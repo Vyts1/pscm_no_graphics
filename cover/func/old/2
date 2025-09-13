@@ -1,0 +1,257 @@
+{$I 'cover\func\HPD3.pas'}  // Металлокерамика1
+
+// Металлокерамика первая версия
+
+procedure advcalculator_mk3 (zabilipodlojku: boolean; Dp, Tpo, TB0, V:real; partmat, incmat, basemat:CCutBoxSet; var H :real; var Ds_vozvr:real; var scen:integer; volcon:real; SplatNum:integer);
+var REGIME:integer;
+//    NAME : array [1..NMMAX] of string[8];
+//    NAMEP, NAMEB, NAMEPb, NAMEPi  : Integer;
+
+    KEBP,KUPL,KUBS:Real;
+
+    LPS,LPL,LP,MUPL,LBS,LBL,LB,MUBL:Real;
+    LPSb,LPLb,LPb,MUPLb:Real;
+    LPSi,LPLi,LPi,MUPLi:Real;
+//C !!!! Если добавляются новые материалы, необходимо откорректировать
+//C !!!! размерности массивов NAME(?), PROP(10,?) и переменную NMMAX
+
+//    PROP:array [1..NPMAX,1..NMMAX] of real;
+    PROPP, PROPB, PROPPi, PROPPb :array [1..NPMAX] of real;
+
+//------------------------------------------------------------------------------
+    PI:real;
+    //VolCon,
+    Up, Tp :real;
+    TEMP0, Smax, FFact, RNUPL:real;
+    i:integer;
+    ROPS,ROPL,CPS,CPL,TPM,SIGMAP, ROBS,ROBL,CBS,CBL,TBM,SIGMAB: real;
+    Tspl,TDspl,HP,HB,TK0,TK,
+    RE,WE,PR,PE,FPB,CDZ,
+    TP0, Td, Tvisc, Tdnd, DS, DSD, HPD :real;
+
+    REPART, WEBERP, ZETAM, ZETAMD, REPLUS, HPMD, HPJD, ZETAJD, ZETAC, HPCD,
+    ZETACD, ZETAU, ZETAUD, HPUD:real;
+    s:string;
+
+label 50, 60, 70, 80, 90, 100;
+
+
+begin
+
+ // {$INCLUDE  'cover\func\init_mat.pas'}
+
+  log ('advcalculator_mk3');
+
+//  partmat, basemat:CCutBoxSet;
+//  var H :real; var Ds_vozvr:real; var scen:integer
+
+  Tp:=Tpo;
+  TEMP0:=Tp;
+
+  //VolCon:=0.6;
+  // <- Материаллы !
+//  NAMEPb:=ReadIniDataInt('met_cer', 'Pb', 21);
+//  NAMEPi:=ReadIniDataInt('met_cer', 'Pi', 22);
+//  NAMEB :=ReadIniDataInt('met_cer', 'B', 16);
+  //VolCon:=ReadIniDataReal ('met_cer', 'VolCon', 0.6);
+
+//  log ('материал частицы Pb=' + inttostr(NAMEPb) + ' это ' + NAME[NAMEPb]);
+//  log ('материал включений Pi=' + inttostr(NAMEPi) + ' это ' + NAME[NAMEPi]);
+//  log ('материал подложки B =' + inttostr(NAMEB) + ' это ' + NAME[NAMEB] );
+
+
+  log ('материал частицы Pb=' + inttostr(partmat.m_nId) + ' это ' + partmat.m_Material);
+  log ('материал включений Pi=' + inttostr(incmat.m_nId) + ' это ' + incmat.m_Material);
+  log ('материал подложки B =' + inttostr(basemat.m_nId) + ' это ' + basemat.m_Material );
+  log ('объемная концентрация VolCon=' + floattostr(VolCon) );
+
+
+
+
+  Up:= V;
+
+  //Si =11
+{  i:=NAMEB;
+  ROBS:=PROP[1,i];
+  ROBL:=PROP[2,i];
+  CBS:=PROP[3,i];
+  CBL:=PROP[4,i];
+  LBS:=PROP[5,i];
+  LBL:=PROP[6,i];
+  TBM:=PROP[7,i];
+  LB:=PROP[8,i];
+  MUBL:=PROP[9,i];
+  SIGMAB:=PROP[10,i];
+ }
+
+
+  ROBS  :=basemat.m_ROms;
+  ROBL  :=basemat.m_ROml;
+  CBS   :=basemat.m_CPms;
+  CBL   :=basemat.m_CPml;
+  LBS   :=basemat.m_Lms;
+  LBL   :=basemat.m_Lml;
+  TBM   :=basemat.m_Tm;
+  LB    :=basemat.m_Lm;
+  MUBL  :=basemat.m_MUml;
+  SIGMAB:=basemat.m_SIGml;
+//  LBOILB:=basemat.m_LBoil;
+//  AWB   :=basemat.m_AW;
+
+
+
+//C_______________________________________________________________________
+//C
+//C! Preparation of properties of metal-ceramic particle taking into
+//C! volume concentration of ultra-fine inclusions in bonding melt.
+//C_______________________________________________________________________
+{     ROPS:=VolCon*PROP[1,NAMEPi] +(1-VolCon)*PROP[1,NAMEPb];
+     ROPL:=VolCon*PROP[2,NAMEPi] +(1-VolCon)*PROP[2,NAMEPb];
+     CPS :=VolCon*PROP[3,NAMEPi] +(1-VolCon)*PROP[3,NAMEPb];
+     CPL :=VolCon*PROP[4,NAMEPi] +(1-VolCon)*PROP[4,NAMEPb];
+     LPS :=VolCon*PROP[5,NAMEPi] +(1-VolCon)*PROP[5,NAMEPb];
+     LPL :=VolCon*PROP[6,NAMEPi] +(1-VolCon)*PROP[6,NAMEPb];
+     TPM := PROP[7,NAMEPb];
+     LP  :=(1-VolCon)*PROP[2,NAMEPb]*PROP[8,NAMEPb]/ROPL; //}
+     //C!  Правка LP в соответствии со статьей в JTST (18.04.2012)
+
+
+     ROPS:=VolCon*incmat.m_ROms +(1-VolCon)*partmat.m_ROms;
+     ROPL:=VolCon*incmat.m_ROml +(1-VolCon)*partmat.m_ROml;
+     CPS :=VolCon*incmat.m_CPms +(1-VolCon)*partmat.m_CPms;
+     CPL :=VolCon*incmat.m_CPml +(1-VolCon)*partmat.m_CPml;
+     LPS :=VolCon*incmat.m_Lms +(1-VolCon)*partmat.m_Lms;
+     LPL :=VolCon*incmat.m_Lml +(1-VolCon)*partmat.m_Lml;
+     TPM := partmat.m_Tm;
+     LP  :=(1-VolCon)*partmat.m_ROml*partmat.m_Lm/ROPL;
+     //C!  Правка LP в соответствии со статьей в JTST (18.04.2012)
+
+
+
+
+
+
+
+
+
+
+  Smax:=0.63;
+//C! Всавить контроль объемной концентрации включений (s < Smax)
+//C! Вязкость чистой связующей берется при ее температуре плавления.
+  if ReadIniDataInt('met_cer', 'formula', 1)= 1 then
+    begin
+      FFact:=step(1/(1-VolCon/Smax), 2.5*Smax);
+    end
+    else
+    begin
+      FFact:=1/(1-VolCon);
+    end;
+
+//  MUPL:=PROP[9,NAMEPb]*FFact;
+//  RNUPL:=MUPL/ROPL;
+//  SIGMAP:=PROP[10,NAMEPb];
+
+  MUPL:=partmat.m_MUml*FFact;
+  RNUPL:=MUPL/ROPL;
+  SIGMAP:=partmat.m_SIGml;
+
+
+//  log ('Fact=' + floattostr(FFact) + ' Mu(s)=' + floattostr(MUPL));
+
+
+  //============================================================================
+
+  if zabilipodlojku then
+    begin
+        ROBS := ROPS;
+        ROBL := ROPL;
+        CBS := CPS;
+        CBL :=CPL;
+        LBS := LPS;
+        LBL := LPL;
+        TBM := TPM;
+        LB := LP;
+        MUBL := MUPL;
+        SIGMAB := SIGMAP;
+    end;
+
+
+    S:= 'Св-ва частицы: 1 ROPS '+floattostr(ROPS)+';'   +
+      '2 ROPL '+floattostr(ROPL)+';'  +
+      '3 CPS '+floattostr(CPS)+';'   +
+      '4 CPL '+floattostr(CPL)+';'  +
+      '5 LPS '+floattostr(LPS)+';' +
+      '6 LPL '+floattostr(LPL)+';' +
+      '7 TPM '+floattostr(TPM)+';' +
+      '8 LP '+floattostr(LP)+';' +
+      '9 MUPL '+floattostr(MUPL)+';' +
+      '10 SIGMAP '+floattostr(SIGMAP)+';';
+
+    S:= S + '   Св-ва подложки: 1 ROBS '+floattostr(ROBS)+';'   +
+      '2 ROBL '+floattostr(ROBL)+';'  +
+      '3 CBS '+floattostr(CBS)+';'   +
+      '4 CBL '+floattostr(CBL)+';'  +
+      '5 LBS '+floattostr(LBS)+';' +
+      '6 LBL '+floattostr(LBL)+';' +
+      '7 TBM '+floattostr(TBM)+';' +
+      '8 LB '+floattostr(LB)+';' +
+      '9 MUBL '+floattostr(MUBL)+';' +
+      '10 SIGMAB '+floattostr(SIGMAB)+';';
+    log (S);
+
+
+
+
+  HPB3
+        (REGIME, Tspl,TDspl,HP,HB,TK0,TK,
+        RE,WE,PR,PE,KEBP,KUPL,KUBS,FPB,CDZ,
+        DP,UP,TP,TB0,
+        ROPS,ROPL,CPS,CPL,LPS,LPL,TPM,LP,MUPL,SIGMAP,
+        ROBS,ROBL,CBS,CBL,LBS,LBL,TBM,LB,MUBL,SIGMAB);
+  //}
+
+
+
+  IF ( REGIME=1) then
+    begin
+
+      Td:=DP/UP;
+      Tvisc:=DP*DP/RNUPL;
+      Tdnd:=TDspl/Td;
+      log ( 'Scenario=' + inttostr(REGIME));
+
+      DS:=SQRT(2/(3*HP)); // ! Diameter of splat from balance of mass
+      DSD:=DP*DS;
+      HPD:=HP*DP;
+      H:=HPD;
+      Ds_vozvr:=DSD;
+
+
+      log ('Computed dimensional diameter & thickness of splat');
+      log ('    Ds,dim=' + floattostr(DSD) +' , mcm;   Hs,dim=' + floattostr(HPD) + ', mcm;');
+      log ('Computed non-dimensional diameter & thickness of splat');
+      log ('Ds,non-dim=' + floattostr(DS) + '      Hs,non-dim=' + floattostr(HP));
+
+    end
+ else
+    begin
+      // Заглушка для 2 сценария ! Это кактастрофа
+      log ('Ёпт! Сценарий не тот !!!!!!!!!!! !!!!!!!!!');
+      scen:=REGIME;
+      HP := Dp / 20;   //<- залушка для отвлечения внимания!
+      DS:=SQRT(2./(3.*HP));
+      DSD:=DP*DS;
+      HPD:=HP*DP;
+      H:=HPD;
+      Ds_vozvr:=DSD;
+    end;
+
+
+ scen:=REGIME;
+
+
+
+end;
+
+
+

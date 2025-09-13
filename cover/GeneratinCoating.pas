@@ -1,0 +1,2829 @@
+
+//{$I 'openglform.pas'} // Функции Paint, resize и DrawCoating  (openGL)
+
+
+
+
+//Основной цикл по генерации покрытия
+procedure GenerateCoatingNew();
+{$I 'cover\var_gen.pas'}
+
+label TRT;
+
+begin
+  t1 := now;
+
+  iniVar.main_log   := ReadIniDataInt('system', 'on_main_log', 1) = 1;
+  iniVar.koord_log  := ReadIniDataInt('system', 'on_koordinat_log', 1) = 1;
+  iniVar.random_log := ReadIniDataInt('system', 'on_random_log', 1) = 1;
+  iniVar.time_log   := ReadIniDataInt('system', 'on_time_log', 1) = 1;
+
+
+  LogReport('=============================================================================================');
+  LogReport('=============================================================================================');
+  LogReport('Номер слоя '+inttostr(iniVar.first_time));
+  LogReport('Время старта слоя ' + vrb.start_timestamp);
+
+
+  if iniVar.main_log then LogReport('Главный лог ВКЛЮЧЕН ')
+                     else LogReport('Главный лог ВЫКЛЮЧЕН ');
+
+
+  if iniVar.is_col then logReport ('Ограничение по количеству сплэтов')
+                   else logReport ('Ограничение по толщине покрытия');
+
+
+  logReport ('Шаг сетки dx='+floattostr(iniVar.diskret_x)+' мкм');
+  LogRec.dx := iniVar.diskret_x;
+
+  logReport ('Будет уложено: '+inttostr(iniVar.kol_spletov)+' сплэтов.');
+  logReport ('Толщина покрытия должна быть ='+floattostr(iniVar.coat)+' мкм. Или ' + floattostr(iniVar.coat / iniVar.diskret_x) + ' дискрет');
+
+  LogRec.N := iniVar.kol_spletov;
+  LogRec.H := round(iniVar.coat);
+
+  LogRec.LayerN := iniVar.first_time;
+
+
+  if iniVar.is_col then
+    begin // по кол-ву
+      LogRec.sk := 1;
+      LogRec.sn := iniVar.kol_spletov;
+    end
+                   else
+    begin // по толщине
+      LogRec.sk := 0;
+      LogRec.sn := round(iniVar.coat);
+    end;
+
+
+  logReport ('Размеры поля fild_size_x:='+floattostr(iniVar.fild_size_X)+'  fild_size_y:='+floattostr(iniVar.fild_size_Y)+ ' мкм');
+  logReport ('Размеры поля fild_size_x:='+inttostr(iniVar.fild_size_x_d)+'  fild_size_y:='+inttostr(iniVar.fild_size_y_d)+ ' дискрет');
+
+  LogRec.x := round(iniVar.fild_size_X / 1000);
+  LogRec.y := round(iniVar.fild_size_Y / 1000);
+
+  if iniVar.sposob_vvoda = 2 then
+    begin
+      logReport ('Будем укладывать по гистограмме : '+iniVar.histogram[iniVar.hist_n].name);
+    end;
+
+ case iniVar.SplatType of
+   0 : logReport ('Сплэты в виде цилиндра');
+   1 : logReport ('Сплэты с гладкой поверхностью');
+ end;
+
+ LogRec.typ := iniVar.SplatType;
+
+ if iniVar.sdvigspleta then logReport ('Сплэты будут сдвигаться (медианный фильтр и т.д.)')
+                       else logReport ('Сплэты НЕ будут сдвигаться (медианный фильтр и т.д.)');
+
+ case iniVar.metod_provisaniya of
+  1 : logReport ('Тип расчета провисания: Up/*');
+  2 : logReport ('Тип расчета провисания: (Up/*)^2');
+  3 : logReport ('Тип расчета провисания: через c1, c0');
+ end;
+ logReport ('Коэф. c0 = '+floattostr(iniVar.const_c0));
+ if iniVar.noise = 0 then logReport ('Шума на поверхности нет ')
+                     else logReport ('Шум на поверхности будет '+floattostr(iniVar.noise)+' мкм');
+ logReport ('Коэф. центральной части сплэта равен (k):Rцентра=Rp*k; k=' + floattostr(iniVar.krp) );
+ logReport ('Угол наклона после которого начинается стекание = '+floattostr(iniVar.koef_mediani));
+
+
+  Vrb.IsSecondType := 0;
+
+
+  {$REGION 'Свернуть нафиг'}
+ //-------------------------------------------------------------------------------------------------------
+ //                     Подготовка :
+ //-------------------------------------------------------------------------------------------------------
+ // Сделать покрытие
+ QueryPerformanceFrequency(freq_HRT_prgstrt);
+ QueryPerformanceCounter(begin_time_prgstrt);
+
+ {$I 'cover\makearrays.pas'}     //<---------
+
+ GenShablon(vrb.max_radius);
+
+   if iniVar.first_time = 1 then
+     begin
+        {$I 'cover\initfild.pas'}       //<---------
+
+        if NOT DirectoryExists('cash') then CreateDir('cash');
+        if NOT DirectoryExists('rez')  then CreateDir('rez');
+        ScanFolder('cash\');
+     end;
+
+ QueryPerformanceFrequency(freq_HRT_mkcoat);
+ QueryPerformanceCounter(begin_time_mkcoat);
+
+ logt2(1,'Time_analys_page');
+ logt2(2,'');
+
+ maincaunter:=1;
+ logit:=true;
+
+ vrb.adg_kol:=0;
+ vrb.adg_chislitel:=0;
+ vrb.adg_kol_v_splete_nekontakt:=0;
+ //-------------------------------------------------------------------------------------------------------
+
+ startavgcoat := CalcAVG;
+ log ('Средняя высота покрытия до старта:' + floattostr(startavgcoat));
+ logReport ('Средняя высота покрытия до старта:' + floattostr(startavgcoat));
+
+
+ //Если уложить надо всего 0 сплэтов, то зачем сюда заходить 
+ if (ReadIniDataInt('init', 'exit', 5) = 1) and (ReadIniDataInt('init', 'kolvo', 5) = 0)
+   then logit:=false;
+
+
+ while logit do
+  begin
+
+   logt(2, 0);
+   logt(1, maincaunter);
+
+//   if maincaunter = 98 then
+//    log('98');
+
+   vrb.adg_sigma_i:=1;
+
+   QueryPerformanceFrequency(freq_HRT_uklsplat);
+   QueryPerformanceCounter(begin_time_uklsplat);
+   log ('------ Начинаем укадывать сплэт № ' + inttostr(maincaunter)+'---------------------------------');
+
+   // Кореектировка координат первых сплетов 3х сплетов в зависимости от stoh
+  {$REGION 'Если пеоеменная ini.stoh <> 0 то меняем координаты сплэта, на предустановленные '}
+
+   if iniVar.stoh = 1 then
+     begin
+   case maincaunter of
+    1:
+       begin
+         vrb.crkl_center_x:=500;
+         vrb.crkl_center_y:=500;
+       end;
+    3:
+       begin
+         vrb.crkl_center_x:=500;
+         vrb.crkl_center_y:=500;
+       end;
+
+    2:
+       begin
+         vrb.crkl_center_x:=500;
+         vrb.crkl_center_y:=500;
+       end;
+   end;
+     end;
+
+
+  if iniVar.stoh=2 then
+    begin
+      BSy := trunc ( (vrb.fild_y-2*iniVar.obrezka) / (vrb.crkl_Rs_1*2));
+      BSx := trunc ( (vrb.fild_x-2*iniVar.obrezka) / (vrb.crkl_Rs_1*2));
+      constRsx := trunc( (vrb.fild_x-2*iniVar.obrezka) / (BSx*2)  );
+      constRsy := trunc( (vrb.fild_y-2*iniVar.obrezka) / (BSy*2)  );
+
+      s:='Кол-во сплэтов в ряду Х: ('+ inttostr(BSx)+ '; Интервалы: '+ inttostr(constRsx)+'; ';
+      log (s);
+
+      if (maincaunter <= BSx*BSy) then
+        begin
+         vrb.crkl_center_y := iniVar.obrezka + constRsy + ((maincaunter-1) div BSy)*constRsy*2;
+         vrb.crkl_center_x := iniVar.obrezka + constRsx + ((maincaunter-1) mod BSx)*constRsx*2;
+        end;
+
+
+    end;
+
+
+
+  if iniVar.stoh=3 then
+   begin
+     BSx := 5;
+
+     if maincaunter=1 then
+       begin
+         vrb.crkl_center_x:=500;
+         vrb.crkl_center_y:=500;
+       end
+     else
+       begin
+         BSy :=   vrb.crkl_Rs_1 - round (vrb.crkl_Rp_1 * iniVar.krp) - 1;
+         vrb.crkl_center_y := round (500+BSy*sin((2*PI*(maincaunter-2))/BSx));
+         vrb.crkl_center_x := round (500+BSy*cos((2*PI*(maincaunter-2))/BSx));
+
+       end;
+
+   end;
+
+
+
+
+  if iniVar.stoh=4 then
+    begin
+      BSy := trunc ( (vrb.fild_y-2*iniVar.obrezka) / (vrb.crkl_Rs_1*2));
+      BSx := trunc ( (vrb.fild_x-2*iniVar.obrezka) / (vrb.crkl_Rs_1*2));
+      constRsx := trunc( (vrb.fild_x-2*iniVar.obrezka) / (BSx*2)  );
+      constRsy := trunc( (vrb.fild_y-2*iniVar.obrezka) / (BSy*2)  );
+
+      s:='Кол-во сплэтов в ряду Х: ('+ inttostr(BSx)+ '; Интервалы: '+ inttostr(constRsx)+'; ';
+      log (s);
+
+   if (maincaunter <= BSx*BSy) then
+     begin
+       vrb.crkl_center_y := iniVar.obrezka + constRsy + ((maincaunter-1) div BSy)*constRsy*2;
+       vrb.crkl_center_x := iniVar.obrezka + constRsx + ((maincaunter-1) mod BSx)*constRsx*2;
+     end else
+   begin
+   if (maincaunter <= 2*BSx*BSy) then
+     begin
+       vrb.crkl_center_y := iniVar.obrezka + 2*constRsy + ((maincaunter-1-BSx*BSy) div BSy)*constRsy*2;
+       vrb.crkl_center_x := iniVar.obrezka + 2*constRsx + ((maincaunter-1-BSx*BSy) mod BSx)*constRsx*2;
+     end
+     else
+     begin
+       goto TRT;
+     end;
+   end;
+
+    end;
+
+
+  if iniVar.stoh=5 then
+    begin
+      BSy := trunc ( (vrb.fild_y-2*iniVar.obrezka) / (vrb.crkl_Rs_1*2));
+      BSx := trunc ( (vrb.fild_x-2*iniVar.obrezka) / (vrb.crkl_Rs_1*2));
+      constRsx := trunc( (vrb.fild_x-2*iniVar.obrezka) / (BSx*2)  );
+      constRsy := trunc( (vrb.fild_y-2*iniVar.obrezka) / (BSy*2)  );
+
+      s:='Кол-во сплэтов в ряду Х: ('+ inttostr(BSx)+ '; Интервалы: '+ inttostr(constRsx)+'; ';
+      log (s);
+
+   if (maincaunter <= BSx*BSy) then
+     begin
+       vrb.crkl_center_y := iniVar.obrezka + constRsy + ((maincaunter-1) div BSy)*constRsy*2;
+       vrb.crkl_center_x := iniVar.obrezka + constRsx + ((maincaunter-1) mod BSx)*constRsx*2;
+     end else
+   begin
+   if (maincaunter <= 2*BSx*BSy) then
+     begin
+       vrb.crkl_center_y := iniVar.obrezka + constRsy+ 10 + ((maincaunter-1-BSx*BSy) div BSy)*constRsy*2;
+       vrb.crkl_center_x := iniVar.obrezka + constRsx+ 10 + ((maincaunter-1-BSx*BSy) mod BSx)*constRsx*2;
+     end
+     else
+     begin
+       goto TRT;
+     end;
+   end;
+
+    end;
+
+
+
+  if iniVar.stoh=6 then
+    begin
+      BSy := trunc ( (vrb.fild_y-2*iniVar.obrezka) / (vrb.crkl_Rs_1*2));
+      BSx := trunc ( (vrb.fild_x-2*iniVar.obrezka) / (vrb.crkl_Rs_1*2));
+      constRsx := trunc( (vrb.fild_x-2*iniVar.obrezka) / (BSx*2)  );
+      constRsy := trunc( (vrb.fild_y-2*iniVar.obrezka) / (BSy*2)  );
+
+      s:='Кол-во сплэтов в ряду Х: ('+ inttostr(BSx)+ '; Интервалы: '+ inttostr(constRsx)+'; ';
+      log (s);
+
+   if (maincaunter <= 1) then
+     begin
+       vrb.crkl_center_y := 500;
+       vrb.crkl_center_x := 500;
+     end else
+   begin
+   if (maincaunter <= 2) then
+     begin
+       vrb.crkl_center_y := 500;
+       vrb.crkl_center_x := 500+ vrb.crkl_Rs_1-round (vrb.crkl_Rp_1 * iniVar.krp*1)-2;
+     end
+     else
+     begin
+       goto TRT;
+     end;
+   end;
+
+    end;
+
+
+  if iniVar.stoh=7 then
+    begin
+
+  //I
+      case maincaunter of
+        1: begin
+             vrb.crkl_center_x := 500;
+             vrb.crkl_center_y := 500;
+           end;
+        2: begin
+             vrb.crkl_center_x := 511;
+             vrb.crkl_center_y := 500;
+           end;
+        3: begin
+             vrb.crkl_center_x := 503;
+             vrb.crkl_center_y := 513;
+           end;
+        4: begin
+             vrb.crkl_center_x := 489;
+             vrb.crkl_center_y := 506;
+           end;
+        5: begin
+             vrb.crkl_center_x := 491;
+             vrb.crkl_center_y := 491;
+           end;
+        6: begin
+             vrb.crkl_center_x := 506;
+             vrb.crkl_center_y := 489;
+           end;
+        7: begin
+             vrb.crkl_center_x := 500;
+             vrb.crkl_center_y := 500;
+           end;
+      end;
+ // }
+
+    end;
+
+
+  if iniVar.stoh=8 then
+    begin
+
+      case maincaunter of
+        1: begin
+             vrb.crkl_center_x := (iniVar.fild_size_x_d - 4) div 2;
+             vrb.crkl_center_y := (iniVar.fild_size_y_d - 4) div 2;
+           end;
+      end;
+
+    end;
+
+  // центр паттерна
+  if iniVar.stoh = 9 then
+    begin
+
+      case maincaunter of
+        1: begin
+
+             if iniVar.modefild=14 then
+               begin
+                 vrb.crkl_center_x := round (trunc(((iniVar.fild_size_x_d - 4) div 2) / (iniVar.a1 + iniVar.a3)) * (iniVar.a1 + iniVar.a3) + (iniVar.a1 / 2));
+                 vrb.crkl_center_y := round (trunc(((iniVar.fild_size_y_d - 4) div 2) / (iniVar.a2 + iniVar.a4)) * (iniVar.a2 + iniVar.a4) + (iniVar.a2 / 2));
+               end;
+
+             if iniVar.modefild=15 then
+               begin
+                 vrb.crkl_center_x := round(  trunc(((iniVar.fild_size_x_d - 4) div 2) / (2*iniVar.a2)) * (2*iniVar.a2) + iniVar.a2 );
+                 vrb.crkl_center_y := round(  trunc(((iniVar.fild_size_y_d - 4) div 2) / (2*iniVar.a2)) * (2*iniVar.a2) + iniVar.a2 );
+               end;
+
+           end;
+      end;
+
+    end;
+
+
+
+   {$ENDREGION}
+
+
+   //------------------------- генерируем параметры сплэта -------------------------------------------------
+   magic_real ( vrb.crkl_center_x, vrb.crkl_center_y,
+                vrb.crkl_Rp_OP, vrb.crkl_Rs_OP, vrb.crkl_height_OP,
+                vrb.crkl_Rp_J, vrb.crkl_Rs_J, vrb.crkl_height_J,
+                vrb.crkl_volume,
+                vrb.tp0, vrb.up0, vrb.tb0, iniVar.SplatType, maincaunter);
+
+//              crkl_Rp_OP, crkl_Rs_OP : integer;
+//              crkl_Rp_J,  crkl_Rs_J : integer;
+//              crkl_height_OP, crkl_height_J : real;
+//              crkl_volume : real;
+
+
+   log ('');
+   log ('');
+
+   s:='По методу ОП: ';
+   log (s);
+   s:='Центр сплета (в микронах) ('+ floattostr(vrb.crkl_center_x*iniVar.diskret_x)+ ';'+ floattostr(vrb.crkl_center_y*iniVar.diskret_x)+') мкм. Rp='+ floattostr(vrb.crkl_Rp_OP*iniVar.diskret_x)+' мкм.  Rs='+ floattostr(vrb.crkl_Rs_OP*iniVar.diskret_x)+' мкм. h=' + floattostr(vrb.crkl_height_OP*iniVar.diskret_x)+'мкм. ';
+   log (s);
+   s:='Центр сплета (в дискретах) ('+ inttostr(vrb.crkl_center_x)+ ';'+ inttostr(vrb.crkl_center_y)+') Rp='+ inttostr(vrb.crkl_Rp_OP)+' Rs='+ inttostr(vrb.crkl_Rs_OP)+' h=' + floattostr(vrb.crkl_height_OP)+' ';
+   log (s);
+   log ('');
+
+
+
+   s:='По методу J: ';
+   log (s);
+   s:='Центр сплета (в микронах) ('+ floattostr(vrb.crkl_center_x*iniVar.diskret_x)+ ';'+ floattostr(vrb.crkl_center_y*iniVar.diskret_x)+') мкм. Rp='+ floattostr(vrb.crkl_Rp_J*iniVar.diskret_x)+' мкм.  Rs='+ floattostr(vrb.crkl_Rs_J*iniVar.diskret_x)+' мкм. h=' + floattostr(vrb.crkl_height_J*iniVar.diskret_x)+'мкм. ';
+   log (s);
+   s:='Центр сплета (в дискретах) ('+ inttostr(vrb.crkl_center_x)+ ';'+ inttostr(vrb.crkl_center_y)+') Rp='+ inttostr(vrb.crkl_Rp_J)+' Rs='+ inttostr(vrb.crkl_Rs_J)+' h=' + floattostr(vrb.crkl_height_J)+' ';
+   log (s);
+
+   log ('');
+
+   if maincaunter = 1 then
+      begin
+        logreport ('');
+        logreport ('Парметры первого сплэта:');
+        logreport ('  По методу ОП: ');
+        logreport ('  Центр сплета (в микронах) ('+ floattostr(vrb.crkl_center_x*iniVar.diskret_x)+ ';'+ floattostr(vrb.crkl_center_y*iniVar.diskret_x)+') мкм. Rp='+ floattostr(vrb.crkl_Rp_OP*iniVar.diskret_x)+' мкм.  Rs='+ floattostr(vrb.crkl_Rs_OP*iniVar.diskret_x)+' мкм. h=' + floattostr(vrb.crkl_height_OP*iniVar.diskret_x)+'мкм. ');
+        logreport ('  Центр сплета (в дискретах) ('+ inttostr(vrb.crkl_center_x)+ ';'+ inttostr(vrb.crkl_center_y)+') Rp='+ inttostr(vrb.crkl_Rp_OP)+' Rs='+ inttostr(vrb.crkl_Rs_OP)+' h=' + floattostr(vrb.crkl_height_OP)+' ');
+        logreport ('  По методу J: ');
+        logreport ('  Центр сплета (в микронах) ('+ floattostr(vrb.crkl_center_x*iniVar.diskret_x)+ ';'+ floattostr(vrb.crkl_center_y*iniVar.diskret_x)+') мкм. Rp='+ floattostr(vrb.crkl_Rp_J*iniVar.diskret_x)+' мкм.  Rs='+ floattostr(vrb.crkl_Rs_J*iniVar.diskret_x)+' мкм. h=' + floattostr(vrb.crkl_height_J*iniVar.diskret_x)+'мкм. ');
+        logreport ('  Центр сплета (в дискретах) ('+ inttostr(vrb.crkl_center_x)+ ';'+ inttostr(vrb.crkl_center_y)+') Rp='+ inttostr(vrb.crkl_Rp_J)+' Rs='+ inttostr(vrb.crkl_Rs_J)+' h=' + floattostr(vrb.crkl_height_J)+' ');
+        logreport ('');
+
+        LogRec.Rs1 := vrb.crkl_Rs_OP;
+
+
+      end;
+
+
+   if Vrb.IsSecondType = 1 then
+      begin
+        logreport ('');
+        logreport ('Парметры сплэта после забывания:');
+        logreport ('  По методу ОП: ');
+        logreport ('  Центр сплета (в микронах) ('+ floattostr(vrb.crkl_center_x*iniVar.diskret_x)+ ';'+ floattostr(vrb.crkl_center_y*iniVar.diskret_x)+') мкм. Rp='+ floattostr(vrb.crkl_Rp_OP*iniVar.diskret_x)+' мкм.  Rs='+ floattostr(vrb.crkl_Rs_OP*iniVar.diskret_x)+' мкм. h=' + floattostr(vrb.crkl_height_OP*iniVar.diskret_x)+'мкм. ');
+        logreport ('  Центр сплета (в дискретах) ('+ inttostr(vrb.crkl_center_x)+ ';'+ inttostr(vrb.crkl_center_y)+') Rp='+ inttostr(vrb.crkl_Rp_OP)+' Rs='+ inttostr(vrb.crkl_Rs_OP)+' h=' + floattostr(vrb.crkl_height_OP)+' ');
+        logreport ('  По методу J: ');
+        logreport ('  Центр сплета (в микронах) ('+ floattostr(vrb.crkl_center_x*iniVar.diskret_x)+ ';'+ floattostr(vrb.crkl_center_y*iniVar.diskret_x)+') мкм. Rp='+ floattostr(vrb.crkl_Rp_J*iniVar.diskret_x)+' мкм.  Rs='+ floattostr(vrb.crkl_Rs_J*iniVar.diskret_x)+' мкм. h=' + floattostr(vrb.crkl_height_J*iniVar.diskret_x)+'мкм. ');
+        logreport ('  Центр сплета (в дискретах) ('+ inttostr(vrb.crkl_center_x)+ ';'+ inttostr(vrb.crkl_center_y)+') Rp='+ inttostr(vrb.crkl_Rp_J)+' Rs='+ inttostr(vrb.crkl_Rs_J)+' h=' + floattostr(vrb.crkl_height_J)+' ');
+        logreport ('');
+        Vrb.IsSecondType := 2;
+        LogRec.Rs2 := vrb.crkl_Rs_OP;
+      end;
+
+
+
+   if iniVar.splattype = 0 then // OP
+     begin
+      vrb.crkl_Rp_1     := vrb.crkl_Rp_OP;
+      vrb.crkl_Rs_1     := vrb.crkl_Rs_OP;
+      vrb.crkl_height_2 := vrb.crkl_height_OP; //толщина расчетная
+     end            else //  J
+     begin
+      vrb.crkl_Rp_1     := vrb.crkl_Rp_J;
+      vrb.crkl_Rs_1     := vrb.crkl_Rs_J;
+      vrb.crkl_height_2 := vrb.crkl_height_OP; //потом подменим
+     end;
+
+
+   logk (maincaunter, vrb.crkl_center_x, vrb.crkl_center_y, vrb.crkl_Rs_1, vrb.crkl_Rp_1);
+   vrb.last_crkl_height := vrb.crkl_height_2;
+
+   if maincaunter = 1 then
+     begin
+        vrb.pervspletX := vrb.crkl_center_x;
+        vrb.pervspletY := vrb.crkl_center_y;
+        vrb.pervspletRs := vrb.crkl_Rs_1;
+        vrb.pervspletRp := vrb.crkl_Rp_1;
+     end;
+
+   s:='#;'+inttostr(maincaunter)+';Cx=;'+inttostr(vrb.crkl_center_x)+';Cy=;'+inttostr(vrb.crkl_center_y)+';Rp=;'+inttostr(vrb.crkl_Rp_1)+';Rs=;'+inttostr(vrb.crkl_Rs_1)+';hs=;'+floattostr(vrb.crkl_height_2)+';';
+   log3(s);
+
+
+   if vrb.crkl_Rs_1 > vrb.max_radius*2-1 then // перестраховочка
+                                      begin
+                                        s:='@@@@ Перестраховка сработала !!!!  Rs вышел за пределы максимального размера шаблона! увеличиваем шаблон';
+                                        log (s);
+
+                                        vrb.max_radius:=vrb.crkl_Rs_1;
+                                        GenShablon(vrb.max_radius*2);
+
+
+                                        //iniVar.Ds_max_d
+                                      end;
+
+
+   if (maincaunter = 1) then
+       begin
+         vrb.first_x  := vrb.crkl_center_x;
+         vrb.first_y  := vrb.crkl_center_y;
+         vrb.first_Rs := vrb.crkl_Rs_1;
+         vrb.first_Rp := vrb.crkl_Rp_1;
+       end;
+
+   vrb.last_x := vrb.crkl_center_x;
+   vrb.last_y := vrb.crkl_center_y;
+   vrb.last_Rs := vrb.crkl_Rs_1;
+   vrb.last_Rp := vrb.crkl_Rp_1;
+
+//====================================================================================================================================
+   {$ENDREGION}
+
+  log ('');
+
+
+  {$REGION 'Рекоординация, расчет переменных'}
+//==============================================================================
+//                      Выделяем область из массива fild   Это будет subfild
+//==============================================================================
+
+   vrb.start_subfild_x := vrb.crkl_center_x - vrb.crkl_Rs_1 - 1 - 1;        //чуть больше для сплайна
+   vrb.start_subfild_y := vrb.crkl_center_y - vrb.crkl_Rs_1 - 1 - 1;
+
+   vrb.end_subfild_x := vrb.crkl_center_x + vrb.crkl_Rs_1 + 1 + 1 + 1;
+   vrb.end_subfild_y := vrb.crkl_center_y + vrb.crkl_Rs_1 + 1 + 1 + 1;
+
+
+   if (vrb.start_subfild_x < 0) OR (vrb.start_subfild_y < 0) OR
+      (vrb.end_subfild_x > inivar.fild_size_x_d) OR
+      (vrb.end_subfild_y > inivar.fild_size_y_d)
+   then
+    begin
+      ShowMessage('Сработала защита, magic вернул лажу.');
+    end;
+
+   log ('start_subfild_x='+inttostr(vrb.start_subfild_x) + '; start_subfild_y=' +inttostr(vrb.start_subfild_y));
+
+
+  // корректировка чтоб не вылазило за поле
+   if vrb.start_subfild_x <= 0 then
+                                vrb.start_subfild_x := 1;
+   if vrb.start_subfild_y <= 0 then
+                                vrb.start_subfild_y := 1;
+
+   if vrb.end_subfild_x > inivar.fild_size_x_d then vrb.end_subfild_x := inivar.fild_size_x_d;
+   if vrb.end_subfild_y > inivar.fild_size_y_d then vrb.end_subfild_y := inivar.fild_size_y_d;
+
+   //---- тогда выделеное поле будет размеров от [0 до subfild_size_x] включительно
+   vrb.subfild_size_x := vrb.end_subfild_x - vrb.start_subfild_x;
+   vrb.subfild_size_y := vrb.end_subfild_y - vrb.start_subfild_y;
+
+   vrb.subfild2_size_x := vrb.subfild_size_x;
+   vrb.subfild2_size_y := vrb.subfild_size_y;
+
+//==============================================================================
+//                    Вычисляем subкоординаты окружности
+//==============================================================================
+   vrb.sub_crkl_center_x := vrb.crkl_center_x - vrb.start_subfild_x;
+   vrb.sub_crkl_center_y := vrb.crkl_center_y - vrb.start_subfild_y;
+ // vrb.sub_crkl_Rp:=vrb.crkl_Rp_1;
+ // vrb.sub_crkl_Rs:=vrb.crkl_Rs_1;
+ // vrb.sub_crkl_height:= vrb.crkl_height_1;
+//==============================================================================
+  {$ENDREGION}
+
+  vrb.kol_k0:=0; vrb.kol_k1:=0; vrb.kol_k2:=0; vrb.kol_k3:=0;
+
+  vrb.fRp := round (vrb.crkl_Rp_1 * iniVar.krp);
+  if vrb.fRp > vrb.crkl_Rs_1 then vrb.fRp:=vrb.crkl_Rs_1;
+  if vrb.fRp < 2 then vrb.fRp:=2;
+
+  logt2(1,'#pre_analiz');
+
+
+
+  {$REGION 'Предзаливка'}
+  // Подготовка: первый статистический прогон.
+
+  kolcentr := 0;
+  kolperef := 0;
+  kolkolco := 0;
+
+
+  {$REGION 'Поиск минимального и максимального в ядре, подсчет точек'}
+  QueryPerformanceFrequency(freq_HRT_poisk_min);
+  QueryPerformanceCounter(begin_time_poisk_min);
+
+  for j:=0 to vrb.crkl_Rs_1 do
+    begin
+      for i:=Low(shablon_array[j]) to High(shablon_array[j]) do
+        begin
+
+          voln_y:=shablon_array[j,i].y + vrb.crkl_center_y;
+          voln_x:=shablon_array[j,i].x + vrb.crkl_center_x;
+
+          if (i=0) AND (j=0) then
+                              begin
+                                minincenter := fild [voln_y, voln_x].z;
+                                maxincenter := fild [voln_y, voln_x].z;
+                              end;
+
+          if j<vrb.fRp then
+                         begin
+                           if maxincenter < fild [voln_y,voln_x].z then maxincenter := fild [voln_y,voln_x].z;
+                           if minincenter > fild [voln_y,voln_x].z then minincenter := fild [voln_y,voln_x].z;
+                           kolcentr:=kolcentr+1;
+                         end
+                        else
+                         begin
+                           if j = vrb.fRp then // кольцо растекания - переломная черта, с нее начинается периферия
+                                           begin
+                                             kolkolco := kolkolco+1;
+                                           end;
+
+                           kolperef:=kolperef+1;
+                         end;
+
+        end;
+    end;
+
+  QueryPerformanceCounter(end_time_poisk_min);
+  log( 'Поиск минимального и максимального в ядре, подсчет точек '+ floattostr(    trunc(((end_time_poisk_min - begin_time_poisk_min)/freq_HRT_poisk_min)*1000*1000*10)/10            ) + ' мкс.');
+  logt(1,timeclc(freq_HRT_poisk_min, begin_time_poisk_min, end_time_poisk_min));
+  {$ENDREGION}
+
+  {$REGION 'Расчет объема капли и ее распределения'}
+  // Расчет объема капли !
+
+  if iniVar.splattype = 0 then particlevolume := (kolperef+kolcentr) * vrb.crkl_height_OP  // OP
+                          else particlevolume := vrb.crkl_volume;                          //  J
+
+//  particlevolume := vrb.crkl_volume;
+//  vrb.crkl_height_3 := particlevolume / (kolperef+kolcentr);
+
+  vrb.PolniyObemKapli := particlevolume;
+
+  if iniVar.splattype = 0 then vrb.IshodnayaH := particlevolume / (kolperef+kolcentr)  // OP
+                          else vrb.IshodnayaH := vrb.crkl_height_2;                    //  J
+
+  log ('Объем частицы реальный (исходя из точного радиуса)' + floattostr(vrb.crkl_volume) + ' дск^3        vrb.crkl_volume');
+  log ('Объем частицы округленный (исходя из дискретизованной окружности)' + floattostr(particlevolume) + ' дск^3       particlevolume');
+  log ('Исходная толщина' + floattostr(vrb.IshodnayaH) + ' дск^3        vrb.IshodnayaH');
+
+
+  sum_volume:=0;
+
+//  tipa_Rp:=step(8,1/3);
+
+  tipa_Rp:=trunc(step(particlevolume*3/(4*PI),1/3));
+
+
+  // Распределение объема капли по массиву subfild3
+  // там высоты "опавшей капли", что бы не залить лишнего
+
+  QueryPerformanceFrequency(freq_HRT_make_volume_array);
+  QueryPerformanceCounter(begin_time_make_volume_array);
+  for j:=0 to vrb.crkl_Rp_1 do
+    begin
+      for i:=Low(shablon_array[j]) to High(shablon_array[j]) do
+        begin
+
+          vrem_y:=shablon_array[j,i].y + vrb.crkl_Rs_1;
+          vrem_x:=shablon_array[j,i].x + vrb.crkl_Rs_1;
+
+          //subfild3 [vrb.crkl_Rs+shablon_array[j,i].y, vrb.crkl_Rs-shablon_array[j,i].x].z :=
+//          tempreal := vrb.crkl_Rs*vrb.crkl_Rs  -  sqr(shablon_array[j,i].x-vrb.crkl_Rs)  -  sqr(shablon_array[j,i].y-vrb.crkl_Rs);
+//          tempreal := vrb.crkl_Rs*vrb.crkl_Rs  -  sqr(shablon_array[j,i].x)  -  sqr(shablon_array[j,i].y);
+          tempreal := tipa_Rp*tipa_Rp  -  sqr(shablon_array[j,i].x)  -  sqr(shablon_array[j,i].y);
+
+          if tempreal >= 0 then // Значит это внутри окружности
+                    begin
+                      subfild3 [vrem_y, vrem_x].z := 2*sqrt(tempreal);
+
+                      if particlevolume - subfild3 [vrem_y, vrem_x].z  <= 0 then
+                        begin
+                          log ('Теория с треском проволилась, это число больше!!!!!');
+                          subfild3 [vrem_y, vrem_x].z := 0;
+                        end
+                      else
+                        begin
+                          particlevolume := particlevolume - subfild3 [vrem_y, vrem_x].z;
+                          sum_volume := sum_volume + subfild3 [vrem_y, vrem_x].z;
+                        end;
+                    end;
+        end;
+    end;
+
+  QueryPerformanceCounter(end_time_make_volume_array);
+  log( 'Инициализация массива объемов '+ floattostr(    trunc(((end_time_make_volume_array - begin_time_make_volume_array)/freq_HRT_make_volume_array)*1000*1000*10)/10            ) + ' мкс.');
+  logt(1,timeclc(freq_HRT_make_volume_array, begin_time_make_volume_array, end_time_make_volume_array));
+
+  log( 'Объем капли после перекачки в массив объемов стал (недокачалось в массив объемов): '+ floattostr( particlevolume ) + ' дск^3');
+  log( 'Объем массива объемов стал (временный массив для заливки ядра): '+ floattostr( sum_volume ) + ' дск^3');
+
+
+  {$ENDREGION}
+
+
+  // Подготовительная работа закончилась, пора делать предзаливку
+
+  log ('fRp '+inttostr(vrb.fRp));
+  log ('Точек в периферии '+inttostr(kolperef));
+  log ('Точек в центре '+inttostr(kolcentr));
+  log ('Точек на дуге '+inttostr(kolkolco));
+  log ('Max в центре '+floattostr(maxincenter));
+  log ('Min в центре '+floattostr(minincenter));
+
+
+  // Создаем массив - список под кольцо.
+  try
+    setlength (hmap, kolperef+1); // 1 на всякий случай             !!!!!!!!!! модернизировать, памяти надо больше = kolperef
+  except
+    log ('Нехватает памяти для создания массива среза ядра по высоте (hmap)');
+    application.terminate;
+  end;
+
+
+  {$REGION 'Создаем hmap из точек дуги'}
+  QueryPerformanceFrequency(freq_HRT_sozdaem_hmap_iz_dugi);
+  QueryPerformanceCounter(begin_time_sozdaem_hmap_iz_dugi);
+
+  // проходим по кольцу что бы найти все уникальные вершины и упорядочить их по возрастанию
+  kolinhmap := 0;
+  for k := 0 to kolkolco - 1 do
+    begin
+      j := vrb.fRp;
+
+      voln_y:=shablon_array[j,Low(shablon_array[j])].y + vrb.crkl_center_y;
+      voln_x:=shablon_array[j,Low(shablon_array[j])].x + vrb.crkl_center_x;
+
+      tempmin := fild [voln_y,voln_x].z;
+
+      for i:=Low(shablon_array[j])+1 to High(shablon_array[j]) do
+        begin
+          voln_y:=shablon_array[j,i].y + vrb.crkl_center_y;
+          voln_x:=shablon_array[j,i].x + vrb.crkl_center_x;
+          if k>0 then
+                   begin
+                     if (tempmin <= hmap[k-1]+zero) AND (fild [voln_y,voln_x].z > hmap[k-1]+zero) then
+                                                                                                    tempmin := fild [voln_y,voln_x].z;
+
+                     if (tempmin > fild [voln_y,voln_x].z) AND (fild [voln_y,voln_x].z > hmap[k-1]+zero)  then
+                                                                                                            tempmin := fild [voln_y,voln_x].z;
+                   end
+                 else
+                   begin
+                     if (tempmin > fild [voln_y,voln_x].z) then
+                                                            tempmin := fild [voln_y,voln_x].z;
+                   end;
+        end;
+
+      if k=0 then
+              begin
+                kolinhmap:=kolinhmap+1;
+                hmap[k]:=tempmin;
+              end
+             else
+              begin
+                if hmap[k-1]+zero < tempmin then
+                                              begin
+                                                hmap[k]:=tempmin;
+                                                kolinhmap:=kolinhmap+1;
+                                              end
+                                            else
+                                              begin
+                                                Break;
+                                              end;
+              end;
+   end;
+//  hmap [0..kolinhmap-1]
+
+  QueryPerformanceCounter(end_time_hmap_iz_dugi);
+  log( 'Создаем hmap из точек дуги '+ floattostr( trunc(((end_time_hmap_iz_dugi - begin_time_hmap_iz_dugi)/freq_HRT_hmap_iz_dugi)*1000*1000*10)/10            ) + ' мкс.');
+  logt(1,timeclc(freq_HRT_hmap_iz_dugi, begin_time_hmap_iz_dugi, end_time_hmap_iz_dugi));
+
+  {$ENDREGION}
+
+  kolinhmap2 := kolinhmap;
+
+  {$REGION 'Создаем hmap из точек центра, которые внутри дуги и выше максимального в дуге'}
+  QueryPerformanceFrequency(freq_HRT_sozdaem_hmap_iz_tochek_vishe);
+  QueryPerformanceCounter(begin_time_sozdaem_hmap_iz_tochek_vishe);
+
+  // теперь расширяем массив в высоту оставшимися точками ядра (внутри дуги), записываем их в конец массива.
+  for k := 0 to kolperef - 1 do
+    begin
+      w:=false; // false = элемент не найден
+
+      for j:=0 to vrb.fRp-1 do
+        begin
+          for i:=Low(shablon_array[j]) to High(shablon_array[j]) do
+            begin
+
+              voln_y:=shablon_array[j,i].y + vrb.crkl_center_y;
+              voln_x:=shablon_array[j,i].x + vrb.crkl_center_x;
+              if    W   then
+                           begin  // Уже был один найденый, но этот может быть лучше
+                             if (fild [voln_y,voln_x].z < tempmin) AND (fild [voln_y,voln_x].z > hmap[kolinhmap2-1]+zero) then
+                                                                     begin
+                                                                       tempmin := fild [voln_y,voln_x].z;
+                                                                    end;
+                           end
+                        else
+                           begin  // Еще не нашли
+                             if (fild [voln_y,voln_x].z > hmap[kolinhmap2-1]+zero) then // хватаем первопопавшую под руку главное чтобы хоть немного больше
+                                                                            begin
+                                                                              w:=true;
+                                                                              tempmin := fild [voln_y,voln_x].z;
+                                                                            end;
+                           end;
+            end;
+        end;
+
+      if w then
+            begin
+              hmap[kolinhmap2]:=tempmin;
+              kolinhmap2:=kolinhmap2+1;
+            end
+           else
+            begin
+              Break;
+            end;
+    end;
+
+  QueryPerformanceCounter(end_time_hmap_iz_tochek_vishe);
+  log( 'Создаем hmap из точек центра, которые внутри дуги и выше максимального в дуге '+ floattostr(    trunc(((end_time_hmap_iz_tochek_vishe - begin_time_hmap_iz_tochek_vishe)/freq_HRT_hmap_iz_tochek_vishe)*1000*1000*10)/10            ) + ' мкс.');
+  logt(1,timeclc(freq_HRT_hmap_iz_tochek_vishe, begin_time_hmap_iz_tochek_vishe, end_time_hmap_iz_tochek_vishe));
+
+  {$ENDREGION}
+
+  QueryPerformanceFrequency(freq_HRT_progon_hmap_1);
+  QueryPerformanceCounter(begin_time_progon_hmap_1);
+
+  //отладка:
+//  for k := 0 to kolinhmap-1 do
+//   begin
+//    log (''+floattostr(hmap[k]));
+//   end;
+//  for k := kolinhmap to kolinhmap2-1 do
+//   begin
+//    log (''+floattostr(hmap[k]));
+//   end;
+
+
+  // Массив высот готов к использованию.==================================
+
+  //Центр будет в vrb.fRp
+  //Нумерация 0..vrb.fRp-1 | vrb.fRp | vrb.fRp+1..vrb.fRp*2
+
+  // Первый прогон:
+  {$REGION 'Прогон 1, то что меньше минимума на дуге, то число в hsrez, что выше то 0'}
+
+  for j:=0 to vrb.fRp*2 do
+    for i:=0 to vrb.fRp*2 do
+      hsrez[j,i]:=0;
+
+  tmpint:=0;
+  index_grani:=0;
+  estvolume:=true;
+
+  for j:=vrb.fRp downto 0 do
+    begin
+      for i:=Low(shablon_array[j]) to High(shablon_array[j]) do
+        begin
+
+          voln_y:=shablon_array[j,i].y + vrb.crkl_center_y;
+          voln_x:=shablon_array[j,i].x + vrb.crkl_center_x;
+
+          if fild [voln_y,voln_x].z < hmap[0] then
+                                                begin
+                                                  tmpint:= tmpint + 1;
+                                                  hsrez[ vrb.fRp + shablon_array[j,i].y , vrb.fRp + shablon_array[j,i].x] := tmpint;
+                                                  if j=vrb.fRp then
+                                                                 index_grani:=tmpint; //чтоб помнить кто последний по номеру
+                                                end
+                                               else
+                                                begin
+                                                  hsrez[ vrb.fRp + shablon_array[j,i].y , vrb.fRp + shablon_array[j,i].x] := 0;
+                                                end;
+        end;
+    end;
+  {$ENDREGION}
+
+  //Запустить алгоритм эпидемии!
+  {$REGION 'Алгоритм эпидемии в срезе'}
+  zalivka;
+  {$ENDREGION}
+
+  {$REGION 'Залить сколько сможем'}
+   // погнали цикл заливки
+     for j:=vrb.fRp downto 0 do
+      begin
+        for i:=Low(shablon_array[j]) to High(shablon_array[j]) do
+          begin
+
+            if hsrez[ vrb.fRp + shablon_array[j,i].y , vrb.fRp + shablon_array[j,i].x] > index_grani then
+                begin  // надо заливать
+
+                  voln_y:=shablon_array[j,i].y + vrb.crkl_center_y;
+                  voln_x:=shablon_array[j,i].x + vrb.crkl_center_x;
+
+                  vrem_y:=shablon_array[j,i].y + vrb.crkl_Rs_1;
+                  vrem_x:=shablon_array[j,i].x + vrb.crkl_Rs_1;
+
+                  doz:= hmap[0] - fild [voln_y,voln_x].z;
+
+                  if doz <= subfild3 [vrem_y, vrem_x].z then
+                    begin //Хватает на заливку полностью.
+//                          sum_volume:=sum_volume+subfild3 [vrem_y, vrem_x].z;
+                           //  subfild3 [vrem_y, vrem_x].z
+                      subfild3 [vrem_y, vrem_x].z:=subfild3 [vrem_y, vrem_x].z - doz;
+                      fild [voln_y, voln_x].z := hmap[0];
+                      sum_volume:=sum_volume-doz;
+                    end
+                                                          else
+                    begin //Полностью не хватает
+                      sum_volume:=sum_volume-subfild3 [vrem_y, vrem_x].z;
+                      fild [voln_y, voln_x].z:=fild [voln_y, voln_x].z + subfild3 [vrem_y, vrem_x].z;
+                      subfild3 [vrem_y, vrem_x].z:=0;
+                    end;
+
+
+                end;
+          end;
+      end;
+  {$ENDREGION}
+
+
+
+  QueryPerformanceCounter(end_time_progon_hmap_1);
+  log( 'Первый прогон hmap (до минимума) '+ floattostr(    trunc(((end_time_progon_hmap_1 - begin_time_progon_hmap_1)/freq_HRT_progon_hmap_1)*1000*1000*10)/10            ) + ' мкс.');
+  logt(1,timeclc(freq_HRT_progon_hmap_1, begin_time_progon_hmap_1, end_time_progon_hmap_1));
+
+  if sum_volume <= zero then
+                        goto dobavleniye_v_up;
+
+  QueryPerformanceFrequency(freq_HRT_progon_hmap_i);
+  QueryPerformanceCounter(begin_time_progon_hmap_i);
+
+  {$REGION 'Проход 2.. i... '}
+
+  for k := 1 to kolinhmap2-1 do
+    begin
+      //Зачистка
+//      for j:=0 to vrb.fRp*2 do
+//        for i:=0 to vrb.fRp*2 do
+//          hsrez[j,i]:=0;
+
+
+      tmpint:=0;
+      index_grani:=0;
+      estvolume:=true;
+
+      for j:=vrb.fRp downto 0 do
+        begin
+          for i:=Low(shablon_array[j]) to High(shablon_array[j]) do
+            begin
+              voln_y:=shablon_array[j,i].y + vrb.crkl_center_y;
+              voln_x:=shablon_array[j,i].x + vrb.crkl_center_x;
+
+              if fild [voln_y,voln_x].z < hmap[k] then
+                                                    begin
+                                                      tmpint:= tmpint + 1;
+                                                      hsrez[ vrb.fRp + shablon_array[j,i].y , vrb.fRp + shablon_array[j,i].x] := tmpint;
+                                                      if j=vrb.fRp then
+                                                                      index_grani:=tmpint;
+                                                    end
+                                                  else
+                                                    begin
+                                                      hsrez[ vrb.fRp + shablon_array[j,i].y , vrb.fRp + shablon_array[j,i].x] := 0;
+                                                    end;
+            end;
+        end;
+
+
+      //Запустить алгоритм эпидемии!
+      zalivka;
+
+
+   // погнали цикл заливки
+      for j:=vrb.fRp downto 0 do
+      begin
+        for i:=Low(shablon_array[j]) to High(shablon_array[j]) do
+          begin
+
+            if hsrez[ vrb.fRp + shablon_array[j,i].y , vrb.fRp + shablon_array[j,i].x] > index_grani then
+                begin  // надо заливать
+
+                  voln_y:=shablon_array[j,i].y + vrb.crkl_center_y;
+                  voln_x:=shablon_array[j,i].x + vrb.crkl_center_x;
+
+                  vrem_y:=shablon_array[j,i].y + vrb.crkl_Rs_1;
+                  vrem_x:=shablon_array[j,i].x + vrb.crkl_Rs_1;
+
+                  doz:= hmap[k] - fild [voln_y,voln_x].z;
+
+                  if doz <= subfild3 [vrem_y, vrem_x].z then
+                    begin //Хватает на заливку полностью.
+//                          sum_volume:=sum_volume+subfild3 [vrem_y, vrem_x].z;
+                           //  subfild3 [vrem_y, vrem_x].z
+                      subfild3 [vrem_y, vrem_x].z:=subfild3 [vrem_y, vrem_x].z - doz;
+                      fild [voln_y, voln_x].z := hmap[k];
+                      sum_volume:=sum_volume-doz;
+                    end
+                                                          else
+                    begin //Полностью не хватает
+                      sum_volume:=sum_volume-subfild3 [vrem_y, vrem_x].z;
+                      fild [voln_y, voln_x].z:=fild [voln_y, voln_x].z + subfild3 [vrem_y, vrem_x].z;
+                      subfild3 [vrem_y, vrem_x].z:=0;
+                    end;
+
+
+                end;
+          end;
+      end;
+
+
+
+      if sum_volume<=zero then break;
+
+    end; // for k=1 to kolinhmap2
+
+  {$ENDREGION}
+  QueryPerformanceCounter(end_time_progon_hmap_i);
+  log( 'Прогоны hmap (до конца) '+ floattostr(    trunc(((end_time_progon_hmap_i - begin_time_progon_hmap_i)/freq_HRT_progon_hmap_i)*1000*1000*10)/10            ) + ' мкс.');
+  logt(1,timeclc(freq_HRT_progon_hmap_i, begin_time_progon_hmap_i, end_time_progon_hmap_i));
+
+
+dobavleniye_v_up:
+
+  log( 'Заливка ядра прошла:');
+  log( 'Объем капли после перекачки в массив объемов стал (недокачалось в массив объемов): '+ floattostr( particlevolume ) + ' дск^3');
+  log( 'Объем массива объемов стал (временный массив для заливки ядра): '+ floattostr( sum_volume ) + ' дск^3');
+
+  particlevolume := particlevolume + sum_volume;
+  sum_volume:=0;
+
+  log( 'Возвращаем остаток : '+ floattostr( particlevolume ) + ' дск^3 в объем капли');
+
+  // пересчитать новое значение толщины сплэта.
+  //vrb.crkl_height_3 := particlevolume / (kolperef + kolcentr);
+
+  if particlevolume=0 then
+                       begin
+                        goto konec_spleta;
+                       end;
+
+  {$REGION 'Добавить в up изменения'}
+  // Добавить в ап. изменения.
+  QueryPerformanceFrequency(freq_HRT_progon_dobavit_izmeneniya_v_up);
+  QueryPerformanceCounter(begin_time_progon_dobavit_izmeneniya_v_up);
+
+   for j:=vrb.start_subfild_y to vrb.end_subfild_y do
+    for i:=vrb.start_subfild_x to vrb.end_subfild_x do
+     begin
+//      if j=500 then
+//      log (inttostr(j)+'  '+inttostr(i));
+      if up[cup[j,i], j, i].s2 < fild [j,i].z then
+                                               begin
+                                                 up[cup[j,i], j, i].s2 := fild [j,i].z;
+
+                                               end;
+
+      if up[cup[j,i], j, i].s2 > fild [j,i].z then
+                                                showmessage ('Это лажа тут ошибка!!!');
+
+     end;
+
+  QueryPerformanceCounter(end_time_progon_dobavit_izmeneniya_v_up);
+//  log( 'Добавить в up изменения '+ floattostr(    trunc(((end_time_progon_dobavit_izmeneniya_v_up - begin_time_progon_dobavit_izmeneniya_v_up)/freq_HRT_progon_dobavit_izmeneniya_v_up)*1000*1000*10)/10            ) + ' мкс.');
+  logt(1,timeclc(freq_HRT_progon_dobavit_izmeneniya_v_up, begin_time_progon_dobavit_izmeneniya_v_up, end_time_progon_dobavit_izmeneniya_v_up));
+
+  {$ENDREGION}
+
+
+  hmap:=nil;
+ {$ENDREGION}
+
+
+
+  propustit_nachalnuy_zalivku:
+
+  logt2(1,'#old_part');
+
+//==============================================================================
+//                   Копирование в субмассив (маленький)   из  большого fild
+//==============================================================================
+
+   {$REGION 'Копировать в subfild из fild '}
+
+  QueryPerformanceFrequency(freq_HRT_sozdat_subfild);
+  QueryPerformanceCounter(begin_time_sozdat_subfild);
+
+   for j:=vrb.start_subfild_y to vrb.end_subfild_y do
+    for i:=vrb.start_subfild_x to vrb.end_subfild_x do
+     begin
+
+      if (j-vrb.start_subfild_y<0) OR (i-vrb.start_subfild_x<0) then
+         begin
+           showmessage ('Выход за границы субмассива  отрицательное значение');
+           Application.Terminate;
+         end;
+
+      if (j-vrb.start_subfild_y>vrb.max_subfild_size_y) OR (i-vrb.start_subfild_x>vrb.max_subfild_size_x) then
+         begin
+           showmessage ('Выход за границы субмассива  большое значение');
+           Application.Terminate;
+         end;
+
+
+      subfild [j-vrb.start_subfild_y, i-vrb.start_subfild_x].x := fild [j,i].x;
+      subfild [j-vrb.start_subfild_y, i-vrb.start_subfild_x].y := fild [j,i].y;
+      subfild [j-vrb.start_subfild_y, i-vrb.start_subfild_x].z := fild [j,i].z;
+      subfild [j-vrb.start_subfild_y, i-vrb.start_subfild_x].color := fild [j,i].c;
+
+      tmpint:= UpRound (  sqrt( sqr(j-vrb.crkl_center_y) + sqr(i-vrb.crkl_center_x) ));
+
+      //----------------------------------
+      //  цвета за сплетом =1, внешний радиус сплэта =5
+      //  от переф [fRp до Rs) =2,  ядро [0; fRp)=3
+      //----------------------------------
+
+      if length (src_array) <= 1 then
+                                  begin
+                                    log ('Массив src_array не создался!');
+                                    Application.Terminate;
+                                  end;
+
+      if tmpint>vrb.crkl_Rs_1 then
+                                     subfild [j-vrb.start_subfild_y, i-vrb.start_subfild_x].c := 1
+                                else
+                                     if tmpint>=vrb.fRp then
+                                                                  begin
+                                                                    if tmpint = vrb.crkl_Rs_1 then subfild [j-vrb.start_subfild_y, i-vrb.start_subfild_x].c := 5
+                                                                                              else subfild [j-vrb.start_subfild_y, i-vrb.start_subfild_x].c := 2;
+                                                                  end
+                                                                else
+                                                                  begin
+                                                                    subfild [j-vrb.start_subfild_y, i-vrb.start_subfild_x].c := 3;
+                                                                  end;
+
+
+      subfild2 [j-vrb.start_subfild_y, i-vrb.start_subfild_x].x := fild [j,i].x;
+      subfild2 [j-vrb.start_subfild_y, i-vrb.start_subfild_x].y := fild [j,i].y;
+      subfild2 [j-vrb.start_subfild_y, i-vrb.start_subfild_x].z := fild [j,i].z;
+      subfild2 [j-vrb.start_subfild_y, i-vrb.start_subfild_x].c := subfild [j-vrb.start_subfild_y, i-vrb.start_subfild_x].c;
+
+      volna[j-vrb.start_subfild_y, i-vrb.start_subfild_x].Si.R:=0;
+      volna[j-vrb.start_subfild_y, i-vrb.start_subfild_x].Ki:=0;
+      volna[j-vrb.start_subfild_y, i-vrb.start_subfild_x].Si.dh:=0;
+      volna[j-vrb.start_subfild_y, i-vrb.start_subfild_x].Si.Zreal:=fild [j,i].z;
+
+     end;
+
+  QueryPerformanceCounter(end_time_sozdat_subfild);
+  log( 'Копировать в subfild из fild '+ floattostr(    trunc(((end_time_sozdat_subfild - begin_time_sozdat_subfild)/freq_HRT_sozdat_subfild)*1000*1000*10)/10            ) + ' мкс.');
+  logt(1,timeclc(freq_HRT_sozdat_subfild, begin_time_sozdat_subfild, end_time_sozdat_subfild));
+
+   {$ENDREGION}
+
+
+
+  //==============================================================================
+  //             Надо скопировать кольцо - fRp в массив для медианного фильтра
+  //==============================================================================
+  if iniVar.sdvigspleta then
+  begin
+
+  vrb.csrc_array := 0;
+
+  for j:=vrb.fRp to vrb.fRp do // только кольцо
+   begin
+      for i:=Low(shablon_array[j]) to High(shablon_array[j]) do
+        begin
+         voln_y:=shablon_array[j,i].y+vrb.sub_crkl_center_y;
+         voln_x:=shablon_array[j,i].x+vrb.sub_crkl_center_x;
+
+         src_array[vrb.csrc_array] := subfild[voln_y, voln_x];
+         vrb.csrc_array := vrb.csrc_array + 1;
+        end;
+   end;
+
+
+ // dump(24);
+  med_filtr (@src_array, vrb.csrc_array);
+ // dump(24);
+
+  GetSmeshenie(src_array[0].x, src_array[0].y, src_array[0].z,
+               src_array[vrb.csrc_array div 3].x, src_array[vrb.csrc_array div 3].y, src_array[vrb.csrc_array div 3].z,
+               src_array[2*vrb.csrc_array div 3].x, src_array[2*vrb.csrc_array div 3].y, src_array[2*vrb.csrc_array div 3].z,
+//               src_array[vrb.csrc_array-1].x, src_array[vrb.csrc_array-1].y, src_array[vrb.csrc_array-1].z,
+               vrb.crkl_Rs_1, vrb.fRp, iniVar.diskret_x,
+               vrb.smeshenie_x, vrb.smeshenie_y );
+
+  vrb.smeshenie_x:=-vrb.smeshenie_x;
+  vrb.smeshenie_y:=-vrb.smeshenie_y;
+
+  // проверить что бы сплэт не сдвинулся за границу.
+
+  if ((vrb.start_subfild_y - vrb.smeshenie_y) < 2) OR
+     ((vrb.end_subfild_y   - vrb.smeshenie_y) > iniVar.fild_size_y_d-2)
+  then
+    begin
+       vrb.smeshenie_y := 0;
+       log ('Защита при смещении !!!!!! после смещения мы вылезли за границу по оси Y');
+    end;
+
+  if ((vrb.start_subfild_x - vrb.smeshenie_x) < 2) OR
+     ((vrb.end_subfild_x   - vrb.smeshenie_x) > iniVar.fild_size_x_d-2)
+  then
+    begin
+       vrb.smeshenie_x := 0;
+       log ('Защита при смещении !!!!!! после смещения мы вылезли за границу по оси X');
+    end;
+
+  log(  'Смещение по оси X ' + inttostr(vrb.smeshenie_x) + '  Смещение по оси Y ' + inttostr(vrb.smeshenie_y) );
+
+  end else
+       begin
+         vrb.smeshenie_x:=0;
+         vrb.smeshenie_y:=0;
+       end;
+  //==============================================================================
+
+
+  //==============================================================================
+  //             Поехали волну гнать по шаблону
+  //==============================================================================
+   {$REGION 'Волновой алгоритм. subfild -> subfild2'}
+  QueryPerformanceFrequency(freq_HRT_volnovoi_algoritm);
+  QueryPerformanceCounter(begin_time_volnovoi_algoritm);
+
+  vrb.kol_k0:=0;
+  vrb.kol_k1:=1;// первая точка это центр
+  vrb.kol_k2:=0;
+  vrb.kol_k3:=0;
+
+  // Внутри ядра, просто посчитать
+  for j:=1 to vrb.fRp-1 do
+   begin
+      for i:=Low(shablon_array[j]) to High(shablon_array[j]) do
+        begin
+         vrb.kol_k1:=vrb.kol_k1+1;
+         voln_y:=shablon_array[j,i].y+vrb.sub_crkl_center_y;
+         voln_x:=shablon_array[j,i].x+vrb.sub_crkl_center_x;
+         subfild2[voln_y, voln_x].z:=subfild[voln_y, voln_x].z;
+
+         volna[voln_y, voln_x].Ki:=1;
+         volna[voln_y, voln_x].Si.R:=j;
+         volna[voln_y, voln_x].Si.dh:=0;
+        end;
+   end;
+
+  j := vrb.fRp;
+
+  // Тоже внутри ядра, но последнее кольцо
+  for i:=Low(shablon_array[j]) to High(shablon_array[j]) do
+    begin
+
+     voln_y:=shablon_array[j,i].y+vrb.sub_crkl_center_y;
+     voln_x:=shablon_array[j,i].x+vrb.sub_crkl_center_x;
+
+     volna[voln_y, voln_x].Ki:=1;
+     volna[voln_y, voln_x].Si.R:=j;
+     volna[voln_y, voln_x].Si.Zreal:=subfild[voln_y, voln_x].z;
+     volna[voln_y, voln_x].Si.dh:=0;
+     subfild2[voln_y, voln_x].z:=subfild[voln_y, voln_x].z;
+
+     vrb.kol_k1:=vrb.kol_k1+1;
+    end;
+
+  // Переферия
+  for j:=vrb.fRp+1 to vrb.crkl_Rs_1 do
+    begin
+      for i:=Low(shablon_array[j]) to High(shablon_array[j]) do
+        begin
+        {$REGION 'Поехали гнать волну по шаблону'}
+
+        //--------------------------------------
+        //-------------ГЛАВНАЯ ЧАСТЬ------------
+        //--------------------------------------
+
+     // координаты текущей точки
+     voln_y:=shablon_array[j,i].y+vrb.sub_crkl_center_y;
+     voln_x:=shablon_array[j,i].x+vrb.sub_crkl_center_x;
+
+     //Ищем предка
+     GetPredok (voln_x, voln_y, vrb.sub_crkl_center_x, vrb.sub_crkl_center_x, j-1, voln_x_pred, voln_y_pred );
+
+     // K=0 полет,  K=1 шкрябанье по поверхности,
+     // K=2 затекание после препятствий (обтекание), типа болота, K=3 это столб, на него не затекает
+     if (volna[voln_y_pred, voln_x_pred].Ki = 0) OR (volna[voln_y_pred, voln_x_pred].Ki = 1)
+        then
+          begin
+           // мы идем в горку или подгорку ?
+           dZ2 := subfild[voln_y, voln_x].z - subfild[voln_y_pred, voln_x_pred].z;
+           if dZ2 >= 0 then   // в горку
+                        begin
+                          if volna[voln_y_pred, voln_x_pred].Ki=1  //уже шкрябались
+                             then
+                               begin
+                                 if volna[voln_y_pred, voln_x_pred].Si.dh+dZ2 < vrb.crkl_height_2*iniVar.koef_natek // можем ли шкрябаться дальше ?
+                                      then
+                                        begin  // врезались, скребемся по поверхности дальше
+                                         volna[voln_y, voln_x].Ki:=1;
+                                         volna[voln_y, voln_x].Si.dh:=volna[voln_y_pred, voln_x_pred].Si.dh+dZ2;
+                                         volna[voln_y, voln_x].Si.R:=j;
+                                         volna[voln_y, voln_x].Si.Zreal:=subfild[voln_y, voln_x].z;
+                                         subfild2[voln_y, voln_x].z:=subfild[voln_y, voln_x].z;
+                                         vrb.kol_k1:=vrb.kol_k1+1;
+                                        end
+                                      else
+                                        begin // Это непокроримая вершина, запас сил на нуле
+                                         volna[voln_y, voln_x].Ki:=3;
+                                         volna[voln_y, voln_x].Si.dh:=vrb.crkl_height_2*iniVar.koef_natek;
+                                         volna[voln_y, voln_x].Si.R:=j;
+                                         if iniVar.k3mode =0 then 
+                                                               begin
+                                         volna[voln_y, voln_x].Si.Zreal:=volna[voln_y_pred, voln_x_pred].Si.Zreal+(vrb.crkl_height_2*iniVar.koef_natek-volna[voln_y_pred, voln_x_pred].Si.dh);
+                                                               end
+                                                             else
+                                                               begin
+                                         volna[voln_y, voln_x].Si.Zreal:=volna[voln_y_pred, voln_x_pred].Si.Zreal+(vrb.crkl_height_2-volna[voln_y_pred, voln_x_pred].Si.dh)*0.3;
+                                                               end;
+                                         subfild2[voln_y, voln_x].z:=volna[voln_y, voln_x].Si.Zreal;
+                                         vrb.kol_k3:=vrb.kol_k3+1;
+                                        end;
+                               end
+                             else  // Ki = 0  уже летели, значит и дальше летим
+                               begin
+                                 // считаем провисание (т.е. на сколько провисает профиль)
+                                 Ziraschet:= RaschetProvisaniya (j, volna[voln_y_pred, voln_x_pred].Si.Zreal, volna[voln_y_pred, voln_x_pred].Si.R, vrb.crkl_height_2, vrb.crkl_Rp_1, vrb.crkl_Rs_1,  vrb.Up0, iniVar.up_divizor);
+
+                                 dZ1 := subfild[voln_y, voln_x].z - Ziraschet;
+
+                                 if dZ1 >= vrb.crkl_height_2*iniVar.koef_natek then  // сравниваем не врезались ли мы в гору на посадке
+                                                             begin
+                                                               volna[voln_y, voln_x].Ki:=3;
+                                                               volna[voln_y, voln_x].Si.dh:=vrb.crkl_height_2*iniVar.koef_natek;
+                                                               volna[voln_y, voln_x].Si.R:=j;
+                                                               if iniVar.k3mode =0 then
+                                                                                     begin
+                                                                                       volna[voln_y, voln_x].Si.Zreal:=Ziraschet+vrb.crkl_height_2*iniVar.koef_natek;
+                                                                                     end
+                                                                                   else
+                                                                                     begin
+                                                                                       volna[voln_y, voln_x].Si.Zreal:=Ziraschet;
+                                                                                     end;
+                                                               subfild2[voln_y, voln_x].z:=volna[voln_y, voln_x].Si.Zreal;
+                                                               vrb.kol_k3:=vrb.kol_k3+1;
+                                                             end
+                                                           else
+                                                             begin  // нет, не врезались
+                                                               if dZ1 >= 0 then
+                                                                             begin // мы сели на гору, начинаем шкрябаться
+                                                                               volna[voln_y, voln_x].Ki:=1;
+                                                                               volna[voln_y, voln_x].Si.dh:=dZ1;
+                                                                               volna[voln_y, voln_x].Si.R:=j;
+                                                                               volna[voln_y, voln_x].Si.Zreal:=subfild[voln_y, voln_x].z;
+                                                                               subfild2[voln_y, voln_x].z:=subfild[voln_y, voln_x].z;
+                                                                               vrb.kol_k1:=vrb.kol_k1+1;
+                                                                             end
+                                                                           else
+                                                                             begin // мы выше горы, надо орентироваться на последнюю точку, чтоб плавно зайти на аэродром
+                                                                               // расчитываем смещение (т.е. на сколько увеличивать провисание)
+                                                                               Zsraschet := RaschetProvisaniya (vrb.crkl_Rs_1, volna[voln_y_pred, voln_x_pred].Si.Zreal, volna[voln_y_pred, voln_x_pred].Si.R, vrb.crkl_height_2, vrb.crkl_Rp_1, vrb.crkl_Rs_1,  vrb.Up0, iniVar.up_divizor);
+                                                                               GetLast (voln_x, voln_y, vrb.sub_crkl_center_x, vrb.sub_crkl_center_y, vrb.crkl_Rs_1, voln_x_s, voln_y_s );
+
+                                                                               // а надо ли ее корректировать вообще ?
+                                                                               dZ0 :=  subfild[voln_y_s, voln_x_s].z - Zsraschet;
+                                                                               if dZ0 < 0 then Ziraschet2 := Ziraschet + ((j-volna[voln_y_pred, voln_x_pred].Si.r)/(vrb.crkl_Rs_1-volna[voln_y_pred, voln_x_pred].si.r)) *dZ0
+                                                                                          else Ziraschet2 := Ziraschet;
+
+                                                                               // скорректировали, а не врежимся ли
+                                                                               dZ4 := subfild[voln_y, voln_x].z - Ziraschet2;
+                                                                               if dZ4 >=0 then
+                                                                                            begin // это плавное смещение с заходом на посадку раньше времени
+                                                                                              volna[voln_y, voln_x].Ki:=1;
+                                                                                              volna[voln_y, voln_x].Si.dh:=0;
+                                                                                              volna[voln_y, voln_x].Si.R:=j;
+                                                                                              volna[voln_y, voln_x].Si.Zreal:=subfild[voln_y, voln_x].z;
+                                                                                              subfild2[voln_y, voln_x].z:=subfild[voln_y, voln_x].z;
+                                                                                              vrb.kol_k1:=vrb.kol_k1+1;
+                                                                                            end
+                                                                                          else
+                                                                                            begin // полет продолжается дальше
+                                                                                              volna[voln_y, voln_x].Ki:=0;
+                                                                                              volna[voln_y, voln_x].Si:=volna[voln_y_pred, voln_x_pred].Si;
+                                                                                              subfild2[voln_y, voln_x].z:=Ziraschet2;
+                                                                                              vrb.kol_k0:=vrb.kol_k0+1;
+                                                                                            end;
+                                                                             end;
+                                                             end;
+                               end;
+                        end
+                       else  //dZ2 < 0      это случай летим подгорку
+                        begin
+                          // прикидываем траекторию полета
+                          Ziraschet := RaschetProvisaniya (j, volna[voln_y_pred, voln_x_pred].Si.Zreal, volna[voln_y_pred, voln_x_pred].Si.R, vrb.crkl_height_2, vrb.crkl_Rp_1, vrb.crkl_Rs_1,  vrb.Up0, iniVar.up_divizor);
+
+                          // не врезается ли она в землю, прямо сейчас ?
+                          dZ1 := subfild[voln_y, voln_x].z - Ziraschet;
+                          if dZ1 >=0 then // врезается, пошли шкрябаться.
+                                      begin
+                                        volna[voln_y, voln_x].Si.dh := volna[voln_y_pred, voln_x_pred].Si.dh + dZ2;
+                                        if volna[voln_y, voln_x].Si.dh < 0 then volna[voln_y, voln_x].Si.dh:=0;
+                                        volna[voln_y, voln_x].Ki:=1;
+                                        volna[voln_y, voln_x].Si.R:=j;
+                                        volna[voln_y, voln_x].Si.Zreal:=subfild[voln_y, voln_x].z;
+                                        subfild2[voln_y, voln_x].z:=subfild[voln_y, voln_x].z;
+                                        vrb.kol_k1:=vrb.kol_k1+1;
+                                      end
+                                     else  //dZ1<0  не врезалась, пробуем корректировать траекторию
+                                      begin
+                                        // расчет скорректированной траектории
+                                        Zsraschet := RaschetProvisaniya (vrb.crkl_Rs_1, volna[voln_y_pred, voln_x_pred].Si.Zreal, volna[voln_y_pred, voln_x_pred].Si.R, vrb.crkl_height_2, vrb.crkl_Rp_1, vrb.crkl_Rs_1,  vrb.Up0, iniVar.up_divizor);
+                                        GetLast (voln_x, voln_y, vrb.sub_crkl_center_x, vrb.sub_crkl_center_y, vrb.crkl_Rs_1, voln_x_s, voln_y_s );
+                                        dZ0 :=  subfild[voln_y_s, voln_x_s].z - Zsraschet;
+
+                                        // а надо ли ее корректировать вообще ?
+                                        if dZ0 < 0 then Ziraschet2 := Ziraschet + ((j-volna[voln_y_pred, voln_x_pred].si.R)/(vrb.crkl_Rs_1-volna[voln_y_pred, voln_x_pred].si.R)) *dZ0
+                                                   else Ziraschet2 := Ziraschet;
+
+                                        // и чё ? скорректированная траектория врезается в пол или нет ?
+                                        dZ3 := subfild[voln_y, voln_x].z - Ziraschet2;
+                                        if dZ3 >=0 then
+                                                     begin  // это мы сверху зашли на посадку, дальше будем свисать с этой врешины
+                                                       volna[voln_y, voln_x].Ki:=1;
+                                                       volna[voln_y, voln_x].Si.dh:=0;
+                                                       volna[voln_y, voln_x].Si.R:=j;
+                                                       volna[voln_y, voln_x].Si.Zreal:=subfild[voln_y, voln_x].z;
+                                                       subfild2[voln_y, voln_x].z:=subfild[voln_y, voln_x].z;
+                                                       vrb.kol_k1:=vrb.kol_k1+1;
+                                                     end
+                                                    else
+                                                     begin // это мы нашли пропасть с нее и летииииим...
+                                                       volna[voln_y, voln_x].Ki:=0;
+                                                       volna[voln_y, voln_x].Si:=volna[voln_y_pred, voln_x_pred].Si;
+                                                       volna[voln_y, voln_x].Si.dh:=0;
+                                                       subfild2[voln_y, voln_x].z:=Ziraschet2;
+                                                       vrb.kol_k0:=vrb.kol_k0+1;
+                                                     end;
+                                      end;
+                        end;
+          end
+        else   // Ki = 2, 3   это уже не растекания, а затекания
+          begin
+            // В Si передается значение, выше которого нельзя делать, это высота лужи. Ниже стекать может, выше только на hs
+
+            // Сравниваем Si с реальной высотой
+            if subfild[voln_y, voln_x].z - volna[voln_y_pred, voln_x_pred].Si.Zreal > 0
+               then // это высота большая, на нее не затечь, делаем ложную вершину
+                begin
+                 volna[voln_y, voln_x].Ki:=3;
+                 volna[voln_y, voln_x].Si := volna[voln_y_pred, voln_x_pred].Si;
+                 subfild2[voln_y, voln_x].z:= volna[voln_y_pred, voln_x_pred].Si.Zreal;
+                 vrb.kol_k3:=vrb.kol_k3+1;
+                end
+               else // это высота не большая, на нее натекаем.
+                begin
+                 volna[voln_y, voln_x].Ki:=2;
+                 subfild2[voln_y, voln_x].z:= subfild[voln_y, voln_x].z;
+                 if iniVar.k3mode =0 then
+                                       begin
+                 volna[voln_y, voln_x].Si.Zreal := subfild[voln_y, voln_x].z+vrb.crkl_height_2*iniVar.koef_natek;
+                                       end
+                                     else
+                                       begin
+                 volna[voln_y, voln_x].Si.Zreal := subfild[voln_y, voln_x].z+vrb.crkl_height_2*0.5;
+                                       end;
+                 volna[voln_y, voln_x].Si.dh := vrb.crkl_height_2*iniVar.koef_natek;
+                 volna[voln_y, voln_x].Si.R := j;
+                 vrb.kol_k2:=vrb.kol_k2+1;
+                end;
+          end; //Ki
+        //--------------------------------------
+         {$ENDREGION}
+        end; // i loop end
+//      csv_dump_file:='dump'+inttostr(j)+'.csv';
+//      dump;
+    end;  // j loop end
+
+  QueryPerformanceCounter(end_time_volnovoi_algoritm);
+  log( 'Волновой алгоритм '+ floattostr(    trunc(((end_time_volnovoi_algoritm - begin_time_volnovoi_algoritm)/freq_HRT_volnovoi_algoritm)*1000*1000*10)/10            ) + ' мкс.');
+  logt(1,timeclc(freq_HRT_volnovoi_algoritm, begin_time_volnovoi_algoritm, end_time_volnovoi_algoritm));
+
+  log ('Кол-во точек после волнового алгоритма: k0=' +inttostr(vrb.kol_k0)+ '; k1='+inttostr(vrb.kol_k1)+'; k2='+inttostr(vrb.kol_k2)+ '; k3='+inttostr(vrb.kol_k3)+';');
+
+
+  {$REGION 'Корректировка Ki=2, чтоб затекало только вниз'}
+  QueryPerformanceFrequency(freq_HRT_korektirovka_volni);
+  QueryPerformanceCounter(begin_time_korektirovka_volni);
+
+  repeat
+  k:=0;
+
+  //  Махинации с Ki  !!!!!!!
+  //  видимо блок сканирует рекурсивно все точки переферии и смотрит может ли туда залитья
+  //  что бы если произошло отрезание стеной, то за нее не протекало
+  //  вводится Ki=5  области полученные за счет переферийной заливки (обтекания препятствий в переф части) 
+  for j:=vrb.fRp to vrb.crkl_Rs_1 do
+    begin
+      for i:=Low(shablon_array[j]) to High(shablon_array[j]) do
+        begin
+         // координаты текущей точки
+         voln_y:=shablon_array[j,i].y+vrb.sub_crkl_center_y;
+         voln_x:=shablon_array[j,i].x+vrb.sub_crkl_center_x;
+
+
+         for l := 1 to 4 do
+           begin
+            case l of
+             1:
+                begin
+                  voln_y2 := voln_y+1;
+                  voln_x2 := voln_x;
+                end;
+             2:
+                begin
+                  voln_y2 := voln_y-1;
+                  voln_x2 := voln_x;
+                end;
+             3:
+                begin
+                  voln_y2 := voln_y;
+                  voln_x2 := voln_x+1;
+                end;
+             4:
+                begin
+                  voln_y2 := voln_y;
+                  voln_x2 := voln_x-1;
+                end;
+            end;
+
+
+            dlen := UpRound(sqrt ( sqr(voln_x2-vrb.sub_crkl_center_x) + sqr(voln_y2-vrb.sub_crkl_center_y) ));
+
+            if (dlen <=vrb.crkl_Rs_1) AND
+               ((volna[voln_y, voln_x].Ki = 1) OR (volna[voln_y, voln_x].Ki = 0)  OR (volna[voln_y, voln_x].Ki = 5))
+               AND ((volna[voln_y2, voln_x2].Ki = 2) OR (volna[voln_y2, voln_x2].Ki = 5))
+            then
+               k:=k+recurent3 (voln_y, voln_x, 18);
+           end;
+
+        end; // i loop end
+    end;     // j loop end
+//   log ('K======================================================================');
+  until (k=0);
+
+  QueryPerformanceCounter(end_time_korektirovka_volni);
+  log( 'Корректировка Ki, чтоб в незатекаемые области не затекало '+ floattostr(    trunc(((end_time_korektirovka_volni - begin_time_korektirovka_volni)/freq_HRT_korektirovka_volni)*1000*1000*10)/10            ) + ' мкс.');
+  logt(1,timeclc(freq_HRT_korektirovka_volni, begin_time_korektirovka_volni, end_time_korektirovka_volni));
+
+  {$ENDREGION}
+
+
+
+  {$REGION 'Посчитать Ki`ые'}
+
+  QueryPerformanceFrequency(freq_HRT_poschitat_Ki);
+  QueryPerformanceCounter(begin_time_poschitat_Ki);
+
+//  log('Прогонов:'+inttostr(raz_prokrucheno) + ';   Сделано замен:'+inttostr(zamen_sdelano)+';');
+
+
+//  log ('Кол-во точек, стало (для проверки): k0=' +inttostr(vrb.kol_k0)+ '; k1='+inttostr(vrb.kol_k1)+'; k2='+inttostr(vrb.kol_k2)+ '; k3='+inttostr(vrb.kol_k3)+'; k4='+inttostr(vrb.kol_k4)+';');
+
+  vrb.kol_k0:=0;
+  vrb.kol_k1:=0;
+  vrb.kol_k2:=0;
+  vrb.kol_k3:=0;
+  vrb.kol_k4:=0;
+
+  volume_korekt_perf:=0;
+
+  // Дальше сделать двойки как тройки. а пятерки как старые двойки.... заодно посчитаем
+  // заливка идет до уровня соседей, требуемые объемы считаются в volume_korekt_perf
+  for j:=vrb.fRp to vrb.crkl_Rs_1 do
+    begin
+      for i:=Low(shablon_array[j]) to High(shablon_array[j]) do
+        begin
+         // координаты текущей точки
+         voln_y:=shablon_array[j,i].y+vrb.sub_crkl_center_y;
+         voln_x:=shablon_array[j,i].x+vrb.sub_crkl_center_x;
+
+         case volna[voln_y, voln_x].Ki of
+           0: vrb.kol_k0 := vrb.kol_k0 + 1;
+           1: vrb.kol_k1 := vrb.kol_k1 + 1;
+           2:
+              begin
+                volna[voln_y, voln_x].Ki:=3;
+                vrb.kol_k3 := vrb.kol_k3 + 1;
+              end;
+           3: vrb.kol_k3 := vrb.kol_k3 + 1;
+           5:
+              begin
+                volna[voln_y, voln_x].Ki:=2;
+                volume_korekt_perf:=volume_korekt_perf + (volna[voln_y, voln_x].Si.Zreal-subfild2[voln_y, voln_x].z);
+
+                if (volna[voln_y, voln_x].Si.Zreal-subfild2[voln_y, voln_x].z) < 0 then showmessage ('Ой, ёпт как так!'); //ЗАГЛУШКА
+
+                vrb.kol_k2 := vrb.kol_k2 + 1;
+              end
+           else
+            log ('Чё за точка в волне?');
+         end;
+
+        end;
+    end;
+  vrb.kol_k1:=vrb.kol_k1+kolcentr;// все центральные точки это Ki=1
+
+  QueryPerformanceCounter(end_time_poschitat_Ki);
+  log( 'Посчитать Ki '+ floattostr(    trunc(((end_time_poschitat_Ki - begin_time_poschitat_Ki)/freq_HRT_poschitat_Ki)*1000*1000*10)/10            ) + ' мкс.');
+  logt(1,timeclc(freq_HRT_poschitat_Ki, begin_time_poschitat_Ki, end_time_poschitat_Ki));
+
+
+  log ('Кол-во точек после переф. заливки : k0=' +inttostr(vrb.kol_k0)+ '; k1='+inttostr(vrb.kol_k1)+'; k2='+inttostr(vrb.kol_k2)+ '; k3='+inttostr(vrb.kol_k3)+'; k5='+inttostr(vrb.kol_k4)+';');
+  {$ENDREGION}
+
+  {$REGION 'Предзаливка переф. части'}
+
+  // Если объем заливок переф части больше чем 0.3Vp, то заливаем переф.
+
+  log( 'Объем капли сейчас: '+ floattostr( particlevolume ) + ' дск^3');
+  log( 'Надо объема что бы сделать переф заливку: '+ floattostr( volume_korekt_perf ) + ' дск^3');
+
+
+  //  if vrb.crkl_height_3*(kolperef+kolcentr)*0.3 > volume_korekt_perf then
+  if particlevolume*0.3 > volume_korekt_perf then
+                                               begin
+                                                //Надо залить!
+//                                                vrb.crkl_height_3 := (vrb.crkl_height_3*(kolperef+kolcentr) - volume_korekt_perf) / (kolperef+kolcentr);
+                                                particlevolume := particlevolume - volume_korekt_perf;
+                                                log( 'Решили, что переф. заливать таки надо');
+                                                for j:=vrb.fRp to vrb.crkl_Rs_1 do
+                                                  begin
+                                                    for i:=Low(shablon_array[j]) to High(shablon_array[j]) do
+                                                      begin
+                                                       // координаты текущей точки
+                                                       voln_y:=shablon_array[j,i].y+vrb.sub_crkl_center_y;
+                                                       voln_x:=shablon_array[j,i].x+vrb.sub_crkl_center_x;
+
+                                                       voln_x2:=voln_x+vrb.start_subfild_x;
+                                                       voln_y2:=voln_y+vrb.start_subfild_y;
+                                                       //subfild [j, i].x := fild [j+vrb.start_subfild_y, i+vrb.start_subfild_x].x;
+
+                                                       if (volna[voln_y, voln_x].Ki=2) AND  (subfild2[voln_y, voln_x].z < volna[voln_y, voln_x].Si.Zreal) then
+                                                         begin // наш клиент.
+//                                                           log ('Точка Y='+ inttostr(j) +'; X='+inttostr(i)+'. Старое значение:'+ floattostr(fild [voln_y2, voln_x2].z)+'. Новое значение:'+floattostr(volna[voln_y, voln_x].Si.Zreal));
+
+                                                           if fild [voln_y2, voln_x2].z > volna[voln_y, voln_x].Si.Zreal
+                                                             then showmessage ('Это лажа дозаливать то, что выше, нельзя!!!');
+
+                                                           subfild2[voln_y, voln_x].z := volna[voln_y, voln_x].Si.Zreal;
+                                                           subfild [voln_y, voln_x].z := subfild2[voln_y, voln_x].z;
+                                                           fild [voln_y2, voln_x2].z := volna[voln_y, voln_x].Si.Zreal;
+                                                           up[cup[voln_y2, voln_x2], voln_y2, voln_x2].s2 := fild [voln_y2, voln_x2].z;
+
+                                                         end;
+
+
+                                                      end;
+                                                  end;
+
+                                               end;
+
+
+
+//  dump (13);
+
+  {$ENDREGION}
+
+   // Исправить вычисления (пока есть лишний прогон это все впорядке)
+//   vrb.crkl_height_3:=vrb.crkl_height_3 + vrb.crkl_height_3 * ((vrb.kol_k3)/(vrb.kol_k1+vrb.kol_k2+vrb.kol_k3+ vrb.kol_k0));
+//   particlevolume := particlevolume + particlevolume * ((vrb.kol_k3)/(vrb.kol_k1+vrb.kol_k2+vrb.kol_k3+ vrb.kol_k0));
+
+  log( 'Это левое место тут объем капли должен был возрости до: '+ floattostr( particlevolume + particlevolume * ((vrb.kol_k3)/(vrb.kol_k1+vrb.kol_k2+vrb.kol_k3+ vrb.kol_k0)) ) + ' дск^3  за счет незаливки точек K=3');
+
+
+ {$ENDREGION}
+
+//  dump (16);// subfild2.Z
+
+//  if maincaunter=50 then
+  //dump(22);
+  //vrb.smeshenie_x := 3;
+  //vrb.smeshenie_y := 2;
+
+  log( 'Объем капли теперь: '+ floattostr( particlevolume ) + ' дск^3      particlevolume');
+
+
+  {$REGION 'Подмена. Мы сдвигаем центр и делаем пересчеты'}
+   //subfild и subfild2 надо сдвинуть
+  if abs(vrb.smeshenie_y)+abs(vrb.smeshenie_x) > 0 then // Если надо смещать, тогда...
+  begin
+  log( 'Решили, что центр двигать НАДО!');
+
+
+  vrb.start_subfild_y:=vrb.start_subfild_y-vrb.smeshenie_y;
+  vrb.start_subfild_x:=vrb.start_subfild_x-vrb.smeshenie_x;
+
+  vrb.end_subfild_x  :=vrb.end_subfild_x  -vrb.smeshenie_x;
+  vrb.end_subfild_y  :=vrb.end_subfild_y  -vrb.smeshenie_y;
+
+  //=======================================================================
+  {$REGION 'smeshenie_y > 0   smeshenie_x > 0'}
+
+  if (vrb.smeshenie_y >= 0)  AND (vrb.smeshenie_x >=0)  then
+    begin
+      for j:=vrb.subfild2_size_y downto 0+vrb.smeshenie_y do
+        for i:=vrb.subfild2_size_x downto 0+vrb.smeshenie_x do
+           begin
+             subfild [j, i] := subfild [j-vrb.smeshenie_y, i-vrb.smeshenie_x];
+             subfild2[j, i] := subfild2[j-vrb.smeshenie_y, i-vrb.smeshenie_x];
+                volna[j, i] := volna[j-vrb.smeshenie_y, i-vrb.smeshenie_x];
+           end;
+
+      for j := 0+vrb.smeshenie_y-1 downto 0 do
+         for i := 0 to vrb.subfild2_size_x do
+           begin
+             subfild [j, i].x := fild [j+vrb.start_subfild_y,i+vrb.start_subfild_x].x;
+             subfild [j, i].y := fild [j+vrb.start_subfild_y,i+vrb.start_subfild_x].y;
+             subfild [j, i].z := fild [j+vrb.start_subfild_y,i+vrb.start_subfild_x].z;
+             subfild [j, i].color := fild [j+vrb.start_subfild_y,i+vrb.start_subfild_x].c;
+
+             subfild2 [j, i].x := fild [j+vrb.start_subfild_y, i+vrb.start_subfild_x].x;
+             subfild2 [j, i].y := fild [j+vrb.start_subfild_y, i+vrb.start_subfild_x].y;
+             subfild2 [j, i].z := fild [j+vrb.start_subfild_y, i+vrb.start_subfild_x].z;
+             subfild2 [j, i].c := subfild [j, i].c;
+
+                 volna[j, i].Ki:= 2;
+           end;
+
+      for i := 0+vrb.smeshenie_x-1 downto 0 do
+         for j := 0 to vrb.subfild2_size_y do
+           begin
+             subfild [j, i].x := fild [j+vrb.start_subfild_y,i+vrb.start_subfild_x].x;
+             subfild [j, i].y := fild [j+vrb.start_subfild_y,i+vrb.start_subfild_x].y;
+             subfild [j, i].z := fild [j+vrb.start_subfild_y,i+vrb.start_subfild_x].z;
+             subfild [j, i].color := fild [j+vrb.start_subfild_y,i+vrb.start_subfild_x].c;
+
+             subfild2 [j, i].x := fild [j+vrb.start_subfild_y, i+vrb.start_subfild_x].x;
+             subfild2 [j, i].y := fild [j+vrb.start_subfild_y, i+vrb.start_subfild_x].y;
+             subfild2 [j, i].z := fild [j+vrb.start_subfild_y, i+vrb.start_subfild_x].z;
+             subfild2 [j, i].c := subfild [j, i].c;
+
+                 volna[j, i].Ki:= 2;
+           end;
+    end;
+  {$ENDREGION}
+  //=======================================================================
+  {$REGION 'smeshenie_y < 0   smeshenie_x < 0'}
+  if (vrb.smeshenie_y < 0) AND (vrb.smeshenie_x < 0) then
+    begin
+
+      for j:=0 to vrb.subfild2_size_y+vrb.smeshenie_y do
+        for i:=0 to vrb.subfild2_size_x+vrb.smeshenie_x do
+           begin
+             subfild [j, i] := subfild[j-vrb.smeshenie_y, i-vrb.smeshenie_x];
+             subfild2[j, i] := subfild2[j-vrb.smeshenie_y, i-vrb.smeshenie_x];
+                volna[j, i] := volna[j-vrb.smeshenie_y, i-vrb.smeshenie_x];
+           end;
+
+      for j := vrb.subfild2_size_y+vrb.smeshenie_y+1 to vrb.subfild2_size_y do
+         for i := 0 to vrb.subfild2_size_x do
+           begin
+             subfild [j, i].x := fild [j+vrb.start_subfild_y,i+vrb.start_subfild_x].x;
+             subfild [j, i].y := fild [j+vrb.start_subfild_y,i+vrb.start_subfild_x].y;
+             subfild [j, i].z := fild [j+vrb.start_subfild_y,i+vrb.start_subfild_x].z;
+             subfild [j, i].color := fild [j+vrb.start_subfild_y,i+vrb.start_subfild_x].c;
+
+             subfild2 [j, i].x := fild [j+vrb.start_subfild_y, i+vrb.start_subfild_x].x;
+             subfild2 [j, i].y := fild [j+vrb.start_subfild_y, i+vrb.start_subfild_x].y;
+             subfild2 [j, i].z := fild [j+vrb.start_subfild_y, i+vrb.start_subfild_x].z;
+             subfild2 [j, i].c := subfild [j, i].c;
+
+                 volna[j, i].Ki:= 2;
+           end;
+
+      for i := vrb.subfild2_size_x+vrb.smeshenie_x+1 to vrb.subfild2_size_x do
+         for j := 0 to vrb.subfild2_size_y do
+           begin
+             subfild [j, i].x := fild [j+vrb.start_subfild_y,i+vrb.start_subfild_x].x;
+             subfild [j, i].y := fild [j+vrb.start_subfild_y,i+vrb.start_subfild_x].y;
+             subfild [j, i].z := fild [j+vrb.start_subfild_y,i+vrb.start_subfild_x].z;
+             subfild [j, i].color := fild [j+vrb.start_subfild_y,i+vrb.start_subfild_x].c;
+
+             subfild2 [j, i].x := fild [j+vrb.start_subfild_y, i+vrb.start_subfild_x].x;
+             subfild2 [j, i].y := fild [j+vrb.start_subfild_y, i+vrb.start_subfild_x].y;
+             subfild2 [j, i].z := fild [j+vrb.start_subfild_y, i+vrb.start_subfild_x].z;
+             subfild2 [j, i].c := subfild [j, i].c;
+
+                 volna[j, i].Ki:= 2;
+           end;
+    end;
+  {$ENDREGION}
+  //=======================================================================
+  {$REGION 'smeshenie_y > 0   smeshenie_x < 0'}
+  if (vrb.smeshenie_y >= 0) AND (vrb.smeshenie_x < 0) then
+    begin
+      for j:=vrb.subfild2_size_y downto 0+vrb.smeshenie_y do
+        for i:=0 to vrb.subfild2_size_x+vrb.smeshenie_x do
+           begin
+             subfild [j, i] := subfild[j-vrb.smeshenie_y, i-vrb.smeshenie_x];
+             subfild2[j, i] := subfild2[j-vrb.smeshenie_y, i-vrb.smeshenie_x];
+                volna[j, i] := volna[j-vrb.smeshenie_y, i-vrb.smeshenie_x];
+           end;
+
+      for j := 0+vrb.smeshenie_y-1 downto 0 do
+         for i := 0 to vrb.subfild2_size_x do
+           begin
+             subfild [j, i].x := fild [j+vrb.start_subfild_y,i+vrb.start_subfild_x].x;
+             subfild [j, i].y := fild [j+vrb.start_subfild_y,i+vrb.start_subfild_x].y;
+             subfild [j, i].z := fild [j+vrb.start_subfild_y,i+vrb.start_subfild_x].z;
+             subfild [j, i].color := fild [j+vrb.start_subfild_y,i+vrb.start_subfild_x].c;
+
+             subfild2 [j, i].x := fild [j+vrb.start_subfild_y, i+vrb.start_subfild_x].x;
+             subfild2 [j, i].y := fild [j+vrb.start_subfild_y, i+vrb.start_subfild_x].y;
+             subfild2 [j, i].z := fild [j+vrb.start_subfild_y, i+vrb.start_subfild_x].z;
+             subfild2 [j, i].c := subfild [j, i].c;
+
+                 volna[j, i].Ki:= 2;
+           end;
+
+      for i := vrb.subfild2_size_x+vrb.smeshenie_x+1 to vrb.subfild2_size_x do
+         for j := 0 to vrb.subfild2_size_y do
+           begin
+             subfild [j, i].x := fild [j+vrb.start_subfild_y,i+vrb.start_subfild_x].x;
+             subfild [j, i].y := fild [j+vrb.start_subfild_y,i+vrb.start_subfild_x].y;
+             subfild [j, i].z := fild [j+vrb.start_subfild_y,i+vrb.start_subfild_x].z;
+             subfild [j, i].color := fild [j+vrb.start_subfild_y,i+vrb.start_subfild_x].c;
+
+             subfild2 [j, i].x := fild [j+vrb.start_subfild_y, i+vrb.start_subfild_x].x;
+             subfild2 [j, i].y := fild [j+vrb.start_subfild_y, i+vrb.start_subfild_x].y;
+             subfild2 [j, i].z := fild [j+vrb.start_subfild_y, i+vrb.start_subfild_x].z;
+             subfild2 [j, i].c := subfild [j, i].c;
+
+                 volna[j, i].Ki:= 2;
+           end;
+    end;
+  {$ENDREGION}
+  //=======================================================================
+  {$REGION 'smeshenie_y < 0   smeshenie_x > 0'}
+  if (vrb.smeshenie_y < 0) AND (vrb.smeshenie_x >= 0) then
+    begin
+      for j:=0 to vrb.subfild2_size_y+vrb.smeshenie_y do
+        for i:=vrb.subfild2_size_x downto 0+vrb.smeshenie_x do
+           begin
+             subfild [j, i] := subfild[j-vrb.smeshenie_y, i-vrb.smeshenie_x];
+             subfild2[j, i] := subfild2[j-vrb.smeshenie_y, i-vrb.smeshenie_x];
+                volna[j, i] := volna[j-vrb.smeshenie_y, i-vrb.smeshenie_x];
+           end;
+
+      for j := vrb.subfild2_size_y+vrb.smeshenie_y+1 to vrb.subfild2_size_y do
+         for i := 0 to vrb.subfild2_size_x do
+           begin
+             subfild [j, i].x := fild [j+vrb.start_subfild_y,i+vrb.start_subfild_x].x;
+             subfild [j, i].y := fild [j+vrb.start_subfild_y,i+vrb.start_subfild_x].y;
+             subfild [j, i].z := fild [j+vrb.start_subfild_y,i+vrb.start_subfild_x].z;
+             subfild [j, i].color := fild [j+vrb.start_subfild_y,i+vrb.start_subfild_x].c;
+
+             subfild2 [j, i].x := fild [j+vrb.start_subfild_y, i+vrb.start_subfild_x].x;
+             subfild2 [j, i].y := fild [j+vrb.start_subfild_y, i+vrb.start_subfild_x].y;
+             subfild2 [j, i].z := fild [j+vrb.start_subfild_y, i+vrb.start_subfild_x].z;
+             subfild2 [j, i].c := subfild [j, i].c;
+
+                 volna[j, i].Ki:= 2;
+           end;
+
+      for i := 0+vrb.smeshenie_x-1 downto 0 do
+         for j := 0 to vrb.subfild2_size_y do
+           begin
+             subfild [j, i].x := fild [j+vrb.start_subfild_y,i+vrb.start_subfild_x].x;
+             subfild [j, i].y := fild [j+vrb.start_subfild_y,i+vrb.start_subfild_x].y;
+             subfild [j, i].z := fild [j+vrb.start_subfild_y,i+vrb.start_subfild_x].z;
+             subfild [j, i].color := fild [j+vrb.start_subfild_y,i+vrb.start_subfild_x].c;
+
+             subfild2 [j, i].x := fild [j+vrb.start_subfild_y, i+vrb.start_subfild_x].x;
+             subfild2 [j, i].y := fild [j+vrb.start_subfild_y, i+vrb.start_subfild_x].y;
+             subfild2 [j, i].z := fild [j+vrb.start_subfild_y, i+vrb.start_subfild_x].z;
+             subfild2 [j, i].c := subfild [j, i].c;
+
+                 volna[j, i].Ki:= 2;
+           end;
+    end;
+  {$ENDREGION}
+  //=======================================================================
+
+//  vrb.sub_crkl_center_x := vrb.sub_crkl_center_x - vrb.smeshenie_x;
+//  vrb.sub_crkl_center_y := vrb.sub_crkl_center_y - vrb.smeshenie_y;
+  vrb.crkl_center_x := vrb.crkl_center_x - vrb.smeshenie_x;
+  vrb.crkl_center_y := vrb.crkl_center_y - vrb.smeshenie_y;
+
+  //Перемаркировка массива
+   for j:=vrb.start_subfild_y to vrb.end_subfild_y do
+    for i:=vrb.start_subfild_x to vrb.end_subfild_x do
+     begin
+
+      tmpint:= UpRound (  sqrt( sqr(j-vrb.crkl_center_y) + sqr(i-vrb.crkl_center_x) ));
+      tmpint_old:= UpRound (  sqrt( sqr(j-(vrb.crkl_center_y+vrb.smeshenie_y)) + sqr(i-(vrb.crkl_center_x+vrb.smeshenie_x)) ));
+
+      if tmpint>vrb.crkl_Rs_1 then
+                                  begin
+                                     subfild [j-vrb.start_subfild_y, i-vrb.start_subfild_x].c := 1;
+                                     volna[j-vrb.start_subfild_y, i-vrb.start_subfild_x].Ki   := 0; //за пределами сплэта они 0 как и были
+                                  end
+                                else
+                                     if tmpint>=vrb.fRp then
+                                                                  begin
+                                                                    if tmpint = vrb.crkl_Rs_1 then subfild [j-vrb.start_subfild_y, i-vrb.start_subfild_x].c := 5 //граница сплэта
+                                                                                              else subfild [j-vrb.start_subfild_y, i-vrb.start_subfild_x].c := 2; //периферия
+
+                                                                    if tmpint_old<vrb.fRp then //если раньше это было ядром, то теперь пусть тоже ядро
+                                                                             subfild [j-vrb.start_subfild_y, i-vrb.start_subfild_x].c := 3; //ядро
+
+                                                                    if tmpint_old>vrb.crkl_Rs_1 then
+                                                                                                 begin
+                                                                                                     volna[j-vrb.start_subfild_y, i-vrb.start_subfild_x].Ki   := 2; //была за границей сплэта и теперь не определена
+                                                                                                     subfild2 [j-vrb.start_subfild_y, i-vrb.start_subfild_x].x := subfild [j-vrb.start_subfild_y, i-vrb.start_subfild_x].x;
+                                                                                                     subfild2 [j-vrb.start_subfild_y, i-vrb.start_subfild_x].y := subfild [j-vrb.start_subfild_y, i-vrb.start_subfild_x].y;
+                                                                                                     subfild2 [j-vrb.start_subfild_y, i-vrb.start_subfild_x].z := subfild [j-vrb.start_subfild_y, i-vrb.start_subfild_x].z;
+                                                                                                 end;
+
+                                                                  end
+                                                                else
+                                                                  begin
+                                                                    if tmpint_old < vrb.fRp then //если раньше это было ядром, то теперь пусть тоже ядро
+                                                                                                subfild [j-vrb.start_subfild_y, i-vrb.start_subfild_x].c := 3
+                                                                                            else //а вот если это новое ядро, то оно вовсе теперь не ядро
+                                                                                                subfild [j-vrb.start_subfild_y, i-vrb.start_subfild_x].c := 2;
+
+                                                                    volna[j-vrb.start_subfild_y, i-vrb.start_subfild_x].Ki   := 1; // Ядро
+                                                                  end;
+      //}
+     end;
+
+
+
+{   s:='Новый центр сплета (в микронах) ('+ floattostr(vrb.crkl_center_x*iniVar.diskret_x)+ ';'+ floattostr(vrb.crkl_center_y*iniVar.diskret_x)+') мкм. Rp='+ floattostr(vrb.crkl_Rp_1*iniVar.diskret_x)+' мкм.  Rs='+ floattostr(vrb.crkl_Rs_1*iniVar.diskret_x)+' мкм. h=' + floattostr(vrb.crkl_height*iniVar.diskret_x)+'мкм. ';
+   log (s);
+   s:='Новый центр сплета (в дискретах) ('+ inttostr(vrb.crkl_center_x)+ ';'+ inttostr(vrb.crkl_center_y)+') Rp='+ inttostr(vrb.crkl_Rp)+' Rs='+ inttostr(vrb.crkl_Rs)+' h=' + floattostr(vrb.crkl_height)+' ';
+   log (s);
+ }
+
+
+   s:='По методу ОП: ';
+   s:='Центр сплета (в микронах) ('+ floattostr(vrb.crkl_center_x*iniVar.diskret_x)+ ';'+ floattostr(vrb.crkl_center_y*iniVar.diskret_x)+') мкм. Rp='+ floattostr(vrb.crkl_Rp_OP*iniVar.diskret_x)+' мкм.  Rs='+ floattostr(vrb.crkl_Rs_OP*iniVar.diskret_x)+' мкм. h=' + floattostr(vrb.crkl_height_OP*iniVar.diskret_x)+'мкм. ';
+   log (s);
+   s:='Центр сплета (в дискретах) ('+ inttostr(vrb.crkl_center_x)+ ';'+ inttostr(vrb.crkl_center_y)+') Rp='+ inttostr(vrb.crkl_Rp_OP)+' Rs='+ inttostr(vrb.crkl_Rs_OP)+' h=' + floattostr(vrb.crkl_height_OP)+' ';
+   log (s);
+
+
+   s:='По методу J: ';
+   s:='Центр сплета (в микронах) ('+ floattostr(vrb.crkl_center_x*iniVar.diskret_x)+ ';'+ floattostr(vrb.crkl_center_y*iniVar.diskret_x)+') мкм. Rp='+ floattostr(vrb.crkl_Rp_J*iniVar.diskret_x)+' мкм.  Rs='+ floattostr(vrb.crkl_Rs_J*iniVar.diskret_x)+' мкм. h=' + floattostr(vrb.crkl_height_J*iniVar.diskret_x)+'мкм. ';
+   log (s);
+   s:='Центр сплета (в дискретах) ('+ inttostr(vrb.crkl_center_x)+ ';'+ inttostr(vrb.crkl_center_y)+') Rp='+ inttostr(vrb.crkl_Rp_J)+' Rs='+ inttostr(vrb.crkl_Rs_J)+' h=' + floattostr(vrb.crkl_height_J)+' ';
+   log (s);
+  end;// если надо смещать вообще
+  {$ENDREGION}
+
+  //dump(22);
+
+
+
+
+
+  {$REGION 'Перепосчитать Ki`ые'}
+
+  QueryPerformanceFrequency(freq_HRT_poschitat_Ki);
+  QueryPerformanceCounter(begin_time_poschitat_Ki);
+
+//  log ('Кол-во точек, стало (для проверки): k0=' +inttostr(vrb.kol_k0)+ '; k1='+inttostr(vrb.kol_k1)+'; k2='+inttostr(vrb.kol_k2)+ '; k3='+inttostr(vrb.kol_k3)+'; k4='+inttostr(vrb.kol_k4)+';');
+
+  vrb.kol_k0:=0;
+  vrb.kol_k1:=1;
+  vrb.kol_k2:=0;
+  vrb.kol_k3:=0;
+  vrb.kol_k4:=0;
+
+ // if maincaunter = 55 then
+//    log('Это то место');
+
+  // Дальше сделать двойки как тройки. а четверки как старые двойки.... заодно посчитаем
+  for j:=1 to vrb.crkl_Rs_1 do
+    begin
+      for i:=Low(shablon_array[j]) to High(shablon_array[j]) do
+        begin
+         // координаты текущей точки
+         voln_y:=shablon_array[j,i].y+vrb.sub_crkl_center_y;
+         voln_x:=shablon_array[j,i].x+vrb.sub_crkl_center_x;
+
+         case volna[voln_y, voln_x].Ki of
+           0: vrb.kol_k0 := vrb.kol_k0 + 1;
+           1: vrb.kol_k1 := vrb.kol_k1 + 1;
+           2: vrb.kol_k2 := vrb.kol_k2 + 1;
+           3: vrb.kol_k3 := vrb.kol_k3 + 1;
+           else
+            log ('Чё за точка в волне?');
+         end;
+
+        end;
+    end;
+
+  QueryPerformanceCounter(end_time_poschitat_Ki);
+  log( 'Перепосчитать Ki '+ floattostr(    trunc(((end_time_poschitat_Ki - begin_time_poschitat_Ki)/freq_HRT_poschitat_Ki)*1000*1000*10)/10            ) + ' мкс.');
+  logt(1,timeclc(freq_HRT_poschitat_Ki, begin_time_poschitat_Ki, end_time_poschitat_Ki));
+
+
+  log ('Кол-во точек после самого сдвига: k0=' +inttostr(vrb.kol_k0)+ '; k1='+inttostr(vrb.kol_k1)+'; k2='+inttostr(vrb.kol_k2)+ '; k3='+inttostr(vrb.kol_k3)+'; k4='+inttostr(vrb.kol_k4)+';');
+  {$ENDREGION}
+
+
+//  if maincaunter=50 then
+//    dump(13);
+
+  //=======================================================================================================
+
+  //=======================================================================================================
+  //                            Раздвигаем
+  //=======================================================================================================
+{  QueryPerformanceFrequency(freq_HRT_razdviganie);
+  QueryPerformanceCounter(begin_time_razdviganie);
+
+  QueryPerformanceCounter(end_time_razdviganie);
+  log( 'Раздвигание/двигание '+ floattostr(    trunc(((end_time_razdviganie - begin_time_razdviganie)/freq_HRT_razdviganie)*1000*1000*10)/10            ) + ' мкс.');
+  logt(1,timeclc(freq_HRT_razdviganie, begin_time_razdviganie, end_time_razdviganie));
+}
+
+
+  //==============================================================================
+  //                      СПЛАЙН АПРОКСИМАЦИЯ
+  //==============================================================================
+  //
+  //==============================================================================
+
+   {$REGION 'Сплайн апроксимация subfild2, результат в subfild4'}
+
+  QueryPerformanceFrequency(freq_HRT_spline1);
+  QueryPerformanceCounter(begin_time_spline1);
+  //INTI Vknot Uknot
+
+  for i:=0 to vrb.M2+3 do uknot[i]:=i/(vrb.M2+3); //вынести наверх!!!
+  for i:=0 to vrb.M2+3 do vknot[i]:=i/(vrb.M2+3); //вынести наверх!!!
+
+  tmpint:=0;
+
+
+  for j:=0 to vrb.subfild2_size_y do
+   for i:=0 to vrb.subfild2_size_x do
+    begin
+
+     p_v[i,j][0]:= subfild2[j, i].x;
+     p_v[i,j][1]:= subfild2[j, i].y;
+     p_v[i,j][2]:= subfild2[j, i].z;
+
+     weight[i,j]:= 1;                             //вынести наверх!!!
+    end;
+
+  j:=vrb.fRp;
+  for i:=Low(shablon_array[j]) to High(shablon_array[j]) do
+    begin
+      weight[shablon_array[j,i].x+vrb.sub_crkl_center_x, shablon_array[j,i].y+vrb.sub_crkl_center_y]:= 3;
+    end;
+
+  j:=vrb.crkl_Rs_1;
+  for i:=Low(shablon_array[j]) to High(shablon_array[j]) do
+    begin
+      weight[shablon_array[j,i].x+vrb.sub_crkl_center_x, shablon_array[j,i].y+vrb.sub_crkl_center_y]:= 1;
+    end;
+
+  nurbs_surface( p_v, weight, uknot, vknot, vrb.subfild2_size_x, vrb.subfild2_size_y, vrb.DIV2x, vrb.DIV2y, oo) ;
+
+  j:=vrb.fRp;
+  for i:=Low(shablon_array[j]) to High(shablon_array[j]) do
+    begin
+      weight[shablon_array[j,i].x+vrb.sub_crkl_center_x, shablon_array[j,i].y+vrb.sub_crkl_center_y]:= 1;
+    end;
+
+  j:=vrb.crkl_Rs_1;
+  for i:=Low(shablon_array[j]) to High(shablon_array[j]) do
+    begin
+      weight[shablon_array[j,i].x+vrb.sub_crkl_center_x, shablon_array[j,i].y+vrb.sub_crkl_center_y]:= 1;
+    end;
+
+  vrb.oo_size_x :=((vrb.subfild2_size_x-3)*vrb.DIV2x);
+  vrb.oo_size_y :=((vrb.subfild2_size_y-3)*vrb.DIV2y);
+
+  for j:=0 to vrb.oo_size_y do
+   for i:=0 to vrb.oo_size_x do
+     begin
+      subfild4[j, i].x := oo[i,j][0];
+      subfild4[j, i].y := oo[i,j][1];
+      subfild4[j, i].z := oo[i,j][2];
+      subfild4[j, i].c := 1;
+     end;
+
+  vrb.subfild4_size_x := vrb.oo_size_x;
+  vrb.subfild4_size_y := vrb.oo_size_y;
+
+  QueryPerformanceCounter(end_time_spline1);
+  log( 'Сплайн апроксимация 1 '+ floattostr(    trunc(((end_time_spline1 - begin_time_spline1)/freq_HRT_spline1)*1000*1000*10)/10            ) + ' мкс.');
+  logt(1,timeclc(freq_HRT_spline1, begin_time_spline1, end_time_spline1));
+
+  {$ENDREGION}
+
+ vrb.DolyaKapli := particlevolume / vrb.PolniyObemKapli;
+ vrb.OpornayaH  := vrb.IshodnayaH * vrb.DolyaKapli;
+
+ log ('Изначальный объем капли: '+floattostr(vrb.PolniyObemKapli));
+ log ('Осталось после всех заливок: '+floattostr(particlevolume));
+ log ('Доля статка: '+floattostr(vrb.DolyaKapli));
+ log ('Опорная толщина (исходная толщина умноженная на долю): '+floattostr(vrb.OpornayaH));
+
+ log ('Далее идет сборка...');
+
+
+
+  //==============================================================================
+  //                    СОБИРАЕМ ВСЁ ПО КУСОЧКАМ 2.
+  //==============================================================================
+  //
+  //==============================================================================
+
+  {$REGION 'Собираем в subfild3 верхнее основание из subfild4, а в subfild2 нижнее основание'}
+
+  QueryPerformanceFrequency(freq_HRT_sborka_verh);
+  QueryPerformanceCounter(begin_time_sborka_verh);
+
+  deltaH:=0;
+
+  tochek_v_okrujnosti2:=0;
+  sum_h2:=0;
+  sum_h1:=0;
+
+  kol_vo_tochek_gde_verh_nije_niza:=0;
+
+  for j:=0 to vrb.subfild_size_y do
+  for i:=0 to vrb.subfild_size_x do
+   begin
+    if (subfild[j, i].c=1) then
+                            begin
+                             // это за пределами сплета, не трогаем
+                             //------------------------------------
+                            end
+                           else
+//                            if (subfild[j, i].c=2) OR (subfild[j, i].c=5) then
+                              //C=2 перефф. C=5 тоже переф, но =Rs
+                              //C=3 центр
+
+                                                    begin
+//   if (j+vrb.start_subfild_y=390) AND (i+vrb.start_subfild_x=302) then
+
+//--------------------------------------------------------------------------------------------------------
+//  БУБЛИК !!!
+//  submas2tosubmas
+//  ищем координаты похжие на subfild[j, i].x subfild[j, i].y
+//  ищем их в окресности точки в subfild3[j, i].x
+//  [(submastosubmas2(j,t1,t2)-1)*div2y, (submastosubmas2(i,t1,t2)-1)*div2x]
+
+   // САМА ТОЧКА ПОИСКА
+   ti := subfild[j, i].x;
+   tj := subfild[j, i].y;
+
+   prj1:=(j-1)*vrb.div2y - 6;                    // квадрат поисков
+   if prj1<0 then prj1:=0;
+
+   prj2:=(j-1)*vrb.div2y + 6;
+   if prj2>vrb.subfild4_size_y then prj2:=vrb.subfild4_size_y;
+
+   pri1:=(i-1)*vrb.div2x - 6;
+   if pri1<0 then pri1:=0;
+
+   pri2:=(i-1)*vrb.div2x + 6;
+   if pri2>vrb.subfild4_size_x then pri2:=vrb.subfild4_size_x;
+
+   find_in_sector2:=false;
+
+   sector1_i:=pri2;
+   sector1_j:=prj2;
+
+   sector2_i:=pri1;
+   sector2_j:=prj2;
+
+   sector3_i:=pri1;
+   sector3_j:=prj1;
+
+   sector4_i:=pri2;
+   sector4_j:=prj1;
+
+   w:=false;
+
+   for j2:=prj1 to prj2 do
+    for i2:=pri1 to pri2 do
+      begin
+
+       if (NOT w)  // т.е. точного значения точки ещё не нашли
+       then
+        begin
+         if (abs(subfild4[j2, i2].x - ti)<zero)
+                            AND
+            (abs(subfild4[j2, i2].y - tj)<zero)
+         then
+          begin
+           // типа если нашли такую точку, то запомним её.
+           w:=true;
+           sector1_i:=i2;
+           sector1_j:=j2;
+          end
+         else
+          begin
+           // а если это точка не точно такая как надо, а просто рядом, то анализируем.
+           sector_len :=  sqrt(sqr(ti-subfild4[j2, i2].x) + sqr(tj-subfild4[j2, i2].y) );
+           if find_in_sector2 then
+                               begin
+                                 if sector_len2 > sector_len then
+                                                               begin
+                                                                sector_len2:=sector_len;
+                                                                sector2_i:=i2;
+                                                                sector2_j:=j2;
+                                                               end;
+                               end
+                              else
+                               begin
+                                 sector_len2:=sector_len;
+                                 sector2_i:=i2;
+                                 sector2_j:=j2;
+                                 find_in_sector2:=true;
+                               end;
+          end;// конец блока если точка не равна той которую ищем.
+
+        end; // проверка w.
+      end; // циклы
+
+
+   if w then // было ли найдено точное значение ???
+          begin // да было
+           tmpver:=subfild4[sector1_j, sector1_i];
+           tmpver.x :=ti;
+           tmpver.y :=tj;
+          end
+         else
+          begin // нет небыло
+           // ----------------- САМОЕ ВЕСЁЛОЕ !!!!   (бывший метод треугольника)
+
+           if find_in_sector2 then
+                               begin // Если есть найденная ближайшая точка
+                                tmpver.x :=ti;
+                                tmpver.y :=tj;
+                                tmpver.z :=subfild4[sector2_j, sector2_i].z;
+                                tmpver.c :=3;
+                               end
+                              else
+                               begin // Если нет найденной ближайшей точки
+                                showmessage ('Соседей не найдено О_о');
+                               end;
+
+           // ----------------- КОНЕЦ САМОГО ВЕСЁЛОГО !!!!
+          end;
+
+
+
+   case subfild[j, i].c of
+    2,5:  //переф
+         begin
+//          subfild[j, i]  //стрый низ
+//          subfild2[j, i] //низ
+//          subfild3[j, i] //верх
+//          volna[voln_y, voln_x].Si.Zreal:=subfild2[voln_y, voln_x].z;
+
+           case volna[j, i].Ki of
+            0,1:
+                 begin
+                   //нижню часть возьмем из опорного массива
+
+                   if iniVar.rejim_nijnego_osnovaniya=1 then
+                     begin
+                       subfild2[j, i].x:=ti;
+                       subfild2[j, i].y:=tj;
+                       subfild2[j, i].z:=tmpver.z;     // до этого это волна...
+                       if subfild2[j, i].x<>ti then
+                                                 ShowMessage('Опаньки. Промах');
+                     end;
+
+                   subfild2[j, i].c:= 0;
+
+                   //верхнюю часть возьмем из сплайна, пока на одном уровне
+                   subfild3[j, i] := tmpver;
+                   subfild3[j, i].c := 0;
+
+                   if subfild[j, i].c=5 then  //если это на границе, то пришпилить
+                                          begin
+                                            subfild2[j, i].z := subfild[j, i].z;
+                                          end;
+
+                 end;
+
+            2:
+                 begin
+                   //Странно почему страбатывает ?
+                   if subfild2[j, i].z<>subfild[j, i].z then
+                        ShowMessage('Оказывается точки могут отличаться !!!');
+
+                   //нижню часть повторим
+//                   subfild2[j, i].x:=ti; // вроде лишняя строка они и так должны быть равны.
+//                   subfild2[j, i].y:=tj; // вроде лишняя строка они и так должны быть равны.
+                   subfild2[j, i].z:=subfild[j, i].z; // вроде лишняя строка они и так должны быть равны.
+                   subfild2[j, i].c:= 2;
+
+                   //верхнюю часть возьмем из сплайна, пока на одном уровне
+                   subfild3[j, i] := tmpver;
+                   subfild3[j, i].c := 2;
+                 end;
+
+            3:
+                 begin
+                   //нижню часть повторим
+//                   subfild2[j, i].x:=ti;
+//                   subfild2[j, i].y:=tj;
+                   subfild2[j, i].z:=subfild[j, i].z;
+                   subfild2[j, i].c:= 3;
+
+                   //верхнюю часть повторим, признак 3 скажет что это гора и ее надо выкинуть.
+                   subfild3[j, i] := subfild2[j, i];
+
+                 end;
+            else
+              ShowMessage('Чё за точка Ki !!!');
+           end; //case
+
+
+         end;//2,5
+    3:  //центр
+         begin
+          //нижню часть повторим
+//          subfild2[j, i].x:=ti;
+//          subfild2[j, i].y:=tj;
+          subfild2[j, i].z:=subfild[j, i].z;
+          subfild2[j, i].c:= 2;
+
+          //верхнюю часть возьмем из сплайна, пока на одном уровне
+          subfild3[j, i] := tmpver;
+          subfild3[j, i].c := 0;
+         end;
+   end;//case
+
+
+   if inivar.splattype = 0 then vrb.CurrentH := particlevolume / (vrb.kol_k0+vrb.kol_k1+vrb.kol_k2)   // OP
+                           else vrb.CurrentH := GetH (j,i, vrb.sub_crkl_center_x, vrb.sub_crkl_center_y, vrb.crkl_Rs_1, vrb.OpornayaH);  //  J
+
+   if subfild2[j, i].z > subfild3[j, i].z + vrb.CurrentH then
+      begin
+        volna[j, i].Ki:=3;
+        subfild2[j, i].c:= 3;
+        subfild3[j, i].c:= 3;
+        subfild3[j, i].z := subfild2[j, i].z;
+        kol_vo_tochek_gde_verh_nije_niza := kol_vo_tochek_gde_verh_nije_niza + 1;
+      end;
+
+   // Если новая точка плюс толщина, ниже чем было покрытие - это брехня.
+   // if subfild3[j, i].z+vrb.crkl_height < subfild[j, i].z then subfild3[j, i].z := subfild[j, i].z;   // <---- вот заноза!
+
+   //пов2 - пов1 = dH
+   deltaH:=deltaH + subfild3[j, i].z-subfild2[j, i].z;
+
+   tochek_v_okrujnosti2:=tochek_v_okrujnosti2+1;
+
+   //посчитаем так, для верности.
+   sum_h2:=sum_h2+subfild3[j, i].z;
+   sum_h1:=sum_h1+subfild2[j, i].z;
+
+   // if (subfild3[j, i].z+vrb.crkl_height-deltaH)-subfild2[j, i].z < 0 then ShowMessage('Толщина отрицательная');
+//--------------------------------------------------------------------------------------------------------
+                                                    end;
+
+   end;
+
+  QueryPerformanceCounter(end_time_sborka_verh);
+  log( 'Сборка верх '+ floattostr(    trunc(((end_time_sborka_verh - begin_time_sborka_verh)/freq_HRT_sborka_verh)*1000*1000*10)/10            ) + ' мкс.');
+  logt(1,timeclc(freq_HRT_sborka_verh, begin_time_sborka_verh, end_time_sborka_verh));
+
+  {$ENDREGION}
+
+
+  vrb.subfild3_size_x:=vrb.subfild2_size_x;
+  vrb.subfild3_size_y:=vrb.subfild2_size_y;
+
+  avg_h1:=sum_h1 / tochek_v_okrujnosti2;
+  avg_h2:=sum_h2 / tochek_v_okrujnosti2;
+  deltaH:=deltaH / tochek_v_okrujnosti2;
+  // верх - dH + h;       низ = верх - dH (по уровню);
+
+  log( 'Чисто точек в окружности 2  '+ inttostr(tochek_v_okrujnosti2));
+  log( 'Сумма высот 2 (верхняя поверхность)  '+ floattostr(sum_h2));
+  log( 'Сумма высот 1 (нижняя поверхность)  '+ floattostr(sum_h1));
+  log( 'Средняя высота 2 верхней поверхности '+ floattostr(avg_h2));
+  log( 'Средняя высота 1 нижней поверхности '+ floattostr(avg_h1));
+  log( 'Отклонение высот (deltaH=S(верх-низ)). Если оно "-", то это плохо. '+ floattostr(deltaH));
+  log( 'Усредненное на все точки поверхности отклонение высот '+ floattostr(deltaH/tochek_v_okrujnosti2));
+  log( 'Число точек, в которых верхнее основание сплэта очень низко '+ inttostr(kol_vo_tochek_gde_verh_nije_niza));
+
+//  if deltaH < 0 then ShowMessage('Всетаки спец режим для верхнего основания нужен.');
+
+//  vrb.crkl_height_3:=(vrb.crkl_height_3*tochek_v_okrujnosti2)/(tochek_v_okrujnosti2-kol_vo_tochek_gde_verh_nije_niza);
+//  particlevolume := particlevolume - kol_vo_tochek_gde_verh_nije_niza;
+
+
+  log( 'Вначале объем капли был: '+ floattostr( vrb.PolniyObemKapli ) + ' дск^3      vrb.PolniyObemKapli');
+  log( 'После всех операций стал: '+ floattostr( particlevolume ) + ' дск^3      particlevolume');
+
+
+ // Проверка по контролю объема: +-3%.
+ if particlevolume > vrb.PolniyObemKapli * 1.03 then
+     begin
+       showmessage ('После заливок объем капли увеличился до ' + floattostr(particlevolume * 100 / vrb.PolniyObemKapli ) + '%  0_o ');
+       Application.Terminate;
+     end;
+
+ {
+ if particlevolume < vrb.PolniyObemKapli * 0.97 then
+     begin
+       showmessage ('После заливок объем капли уменьшился до ' + floattostr(particlevolume * 100 / vrb.PolniyObemKapli ) + '%  0_o ');
+       Application.Terminate;
+     end;
+ }
+
+
+
+  logt2(1,'#upd_cover');
+//  {$REGION 'Добавляем изменения в up'}
+
+//  (volna[j, i].Ki<>3)
+
+  QueryPerformanceFrequency(freq_HRT_dobavlenie_v_up);
+  QueryPerformanceCounter(begin_time_dobavlenie_v_up);
+
+  vrb.adg_kol_v_splete:=0;
+  vrb.VolControl :=0;
+
+  for j:=0 to vrb.subfild_size_y do
+   for i:=0 to vrb.subfild_size_x do
+    begin
+          //==========================================================================================================================
+          //  Если хотим круглый сплэт
+          //==========================================================================================================================
+
+    if inivar.splattype = 0 then vrb.CurrentH := particlevolume / (vrb.kol_k0+vrb.kol_k1+vrb.kol_k2)  // OP
+                            else vrb.CurrentH := GetH (j,i, vrb.sub_crkl_center_x, vrb.sub_crkl_center_y, vrb.crkl_Rs_1, vrb.OpornayaH);//  J
+
+    if (subfild[j, i].c<>1) then
+        begin
+
+          case iniVar.colormode of
+           0: tmpint:=4; //<------ Скоростной режим
+           1:
+               begin
+                 case subfild[j, i].c of
+                  2,5: tmpint:=3; //переф.
+                  3: tmpint:=4; // центр
+                 end;
+               end;
+          end;
+
+          vrem_x:=i+vrb.start_subfild_x;
+          vrem_y:=j+vrb.start_subfild_y;
+
+//           if (subfild[j, i].c=5) AND (volna[j, i].Ki<>3)
+//               then  dropkub3 (j+vrb.start_subfild_y,i+vrb.start_subfild_x, subfild2[j, i], tmpint, (subfild3[j, i].z+vrb.crkl_height)-subfild2[j, i].z, subfild[j, i].c+2, 5)
+//               else  dropkub3 (j+vrb.start_subfild_y,i+vrb.start_subfild_x, subfild2[j, i], tmpint, (subfild3[j, i].z+vrb.crkl_height)-subfild2[j, i].z, subfild[j, i].c+2, volna[j, i].Ki);
+
+          // было выше условие что...   if subfild2[j, i].z > subfild3[j, i].z + vrb.CurrentH then тогда 3 = 2
+
+          if (subfild3[j, i].z+vrb.CurrentH-deltaH)-subfild2[j, i].z < 0 then
+                                                                              begin
+//                                                                                ShowMessage('Толщина отрицательная. Maincounter=' + inttostr(maincaunter) + ' J=' + inttostr(j) + ' I=' + inttostr(i));
+                                                                                log('!!!! Толщина отрицательная. Maincounter=' + inttostr(maincaunter) + ' J=' + inttostr(j) + ' I=' + inttostr(i));
+                                                                              end
+                                                                            else
+                                                                              begin
+          //точка попадает в то место!!
+
+          if (up[cup[vrem_y, vrem_x], vrem_y, vrem_x].tp = 1) AND
+             (iniVar.obrezka <= vrem_y) AND (vrem_y<= vrb.fild_y-iniVar.obrezka) AND
+             (iniVar.obrezka <= vrem_x) AND (vrem_x<= vrb.fild_x-iniVar.obrezka) AND
+             ((subfild3[j, i].z+vrb.CurrentH-deltaH)-subfild2[j, i].z > 0) then
+            begin
+              if subfild2[j, i].z-zero > up[cup[vrem_y, vrem_x], vrem_y, vrem_x].s2
+                    then // не контакт
+                      vrb.adg_kol_v_splete_nekontakt:=vrb.adg_kol_v_splete_nekontakt+1
+                    else // контакт
+                      vrb.adg_kol_v_splete:=vrb.adg_kol_v_splete+1;
+
+
+            end;
+
+          // Координаты смещенного центра = sub_crkl_center_x+smeshenie_x
+          //                              = sub_crkl_center_y+smeshenie_y
+
+          //vrb.RInOldSplat:= UpRound (  sqrt( sqr(j-vrb.sub_crkl_center_y) + sqr(i-vrb.sub_crkl_center_x) ));
+          //vrb.RInNewSplat:= UpRound (  sqrt( sqr(j-(vrb.sub_crkl_center_y+smeshenie_y)) + sqr(i-(vrb.sub_crkl_center_x+smeshenie_x)) ));
+
+
+
+{          if vrb.CurrentH < 0 then
+             begin
+               ShowMessage ('Как так отрицательная толщина');
+               vrb.CurrentH := 0;
+             end;}
+
+          vrb.VolControl := vrb.VolControl + vrb.CurrentH;
+
+          if (subfild[j, i].c=5) AND (volna[j, i].Ki<>3)
+               then
+                 begin
+                   dropkub3 (vrem_y, vrem_x, subfild2[j, i], tmpint, iniVar.first_time,(subfild3[j, i].z+vrb.CurrentH-deltaH)-subfild2[j, i].z, subfild[j, i].c+2, 5)
+                 end
+               else
+                 begin
+                   dropkub3 (vrem_y, vrem_x, subfild2[j, i], tmpint, iniVar.first_time,(subfild3[j, i].z+vrb.CurrentH-deltaH)-subfild2[j, i].z, subfild[j, i].c+2, volna[j, i].Ki);
+                 end;
+          //==========================================================================================================================
+
+          //==========================================================================================================================
+          // Если хотим цилиндр сплэт
+          //==========================================================================================================================
+{          if (subfild[j, i].c=5) AND (volna[j, i].Ki<>3)
+               then
+                 begin
+                   dropkub3 (vrem_y, vrem_x, subfild2[j, i], tmpint, (subfild3[j, i].z+vrb.crkl_height-deltaH)-subfild2[j, i].z, subfild[j, i].c+2, 5)
+
+                 end
+               else
+                 begin
+                   dropkub3 (vrem_y, vrem_x, subfild2[j, i], tmpint, (subfild3[j, i].z+vrb.crkl_height-deltaH)-subfild2[j, i].z, subfild[j, i].c+2, volna[j, i].Ki);
+                 end;
+//}
+          //==========================================================================================================================
+
+
+                                                                              end;
+
+        end;
+   end;
+
+
+  vrb.adg_chislitel := vrb.adg_chislitel + vrb.adg_sigma_i*vrb.adg_kol_v_splete;
+  vrb.adg_kol := vrb.adg_kol + vrb.adg_kol_v_splete;
+
+  log( 'Итоги по контролю объема');
+  log( 'Вначале объем капли был: '+ floattostr( vrb.PolniyObemKapli ) + ' дск^3      vrb.PolniyObemKapli');
+  log( 'После всех операций стал: '+ floattostr( particlevolume ) + ' дск^3      particlevolume');
+  log ('Объем капли который реально положили на поверхность: '+floattostr(vrb.VolControl));
+  log ('Объем капли который реально положили на поверхность: '+floattostr(vrb.VolControl/(particlevolume)*100)+'% от того что надо было положить');
+
+  QueryPerformanceCounter(end_time_dobavlenie_v_up);
+  log( 'Добавление в up '+ floattostr(    trunc(((end_time_dobavlenie_v_up - begin_time_dobavlenie_v_up)/freq_HRT_dobavlenie_v_up)*1000*1000*10)/10            ) + ' мкс.');
+  logt(1,timeclc(freq_HRT_dobavlenie_v_up, begin_time_dobavlenie_v_up, end_time_dobavlenie_v_up));
+
+  {
+  // БЛОК ОТКЛЮЧЕН ЗА НЕ ВОСТРЕБОВАНОСТЬЮ, полностью рабочий
+  //Ловушка шипов.
+  for j:=1 to vrb.subfild_size_y-1 do
+   for i:=1 to vrb.subfild_size_x-1 do
+    begin
+    if (subfild[j, i].c<>1) then
+        begin
+          vrem_x:=i+vrb.start_subfild_x;
+          vrem_y:=j+vrb.start_subfild_y;
+
+          if (up[cup[vrem_y, vrem_x], vrem_y, vrem_x].s2 - up[cup[vrem_y-1, vrem_x], vrem_y-1, vrem_x].s2 > 5) AND
+             (up[cup[vrem_y, vrem_x], vrem_y, vrem_x].s2 - up[cup[vrem_y+1, vrem_x], vrem_y+1, vrem_x].s2 > 5) AND
+             (up[cup[vrem_y, vrem_x], vrem_y, vrem_x].s2 - up[cup[vrem_y, vrem_x-1], vrem_y, vrem_x-1].s2 > 5) AND
+             (up[cup[vrem_y, vrem_x], vrem_y, vrem_x].s2 - up[cup[vrem_y, vrem_x+1], vrem_y, vrem_x+1].s2 > 5)
+
+          then
+            begin
+              log ('тек. '+floattostr(up[cup[vrem_y, vrem_x], vrem_y, vrem_x].s2));
+              log (floattostr(up[cup[vrem_y-1, vrem_x], vrem_y-1, vrem_x].s2));
+              log (floattostr(up[cup[vrem_y+1, vrem_x], vrem_y+1, vrem_x].s2));
+              log (floattostr(up[cup[vrem_y, vrem_x-1], vrem_y, vrem_x-1].s2));
+              log (floattostr(up[cup[vrem_y, vrem_x+1], vrem_y, vrem_x+1].s2));
+              log ('Попался шип!. #' + inttostr(maincaunter) + '. J='+ inttostr(j)+'. I='+inttostr(i)+'.' );
+            end;
+        end;
+    end;
+   }
+
+
+
+//  {$ENDREGION}
+//
+
+
+konec_spleta:
+//   dump(9); // up
+//   dump(7); // subfild3
+//   dump(2); // t11, t12, t21, t22
+//   dump(4); // subfild
+//   dump(5); // subfild2
+//   dump(7); // subfild3
+//   dump(8); // subfild4
+//   dump(1); // shablon_array
+//   dump(6); // oo
+//   dump(9); // up
+
+
+
+
+
+
+
+
+   TRT:
+
+   {$REGION 'Свернуть нафиг'}
+
+//====================================================================================================================================
+//   {$ENDREGION}
+
+  if maincaunter mod 20 = 0 then
+    begin
+      // maincaunter:=maincaunter+1;
+      avgcoat:= CalcAVG;
+
+      if (NOT iniVar.is_col) AND (avgcoat-startavgcoat > iniVar.coat) then logit:=false;
+      log ('Средняя высота покрытия:' + floattostr(avgcoat-startavgcoat));
+
+      LogRec.HR := round (avgcoat); 
+
+      if (avgcoat-startavgcoat) < 0 then ShowMessage('хммм... Покрытие стало тоньше');
+
+    end;
+
+
+   if iniVar.is_col AND (maincaunter>=iniVar.kol_spletov) then logit:=false;
+
+
+    if iniVar.is_col then
+       begin
+         // по кол-ву
+         ProcLog (maincaunter / iniVar.kol_spletov, inttostr(round((now-t1)*60*24))+' мин' );
+       end
+       else
+       begin
+         // по высоте
+         ProcLog ((avgcoat-startavgcoat) / iniVar.coat,  inttostr(round((now-t1)*60*24))+' мин'  );
+       end;
+
+
+   QueryPerformanceCounter(end_time_uklsplat);
+   log ('Время укладки сплэта: '+ floattostr( trunc(((end_time_uklsplat - begin_time_uklsplat)/freq_HRT_uklsplat)*10000000)/10            ) + ' мкс');
+   log ('------------------------------------------------------------------------');
+
+   logt2(1,'#rezult');
+   logt(1,timeclc(freq_HRT_uklsplat, begin_time_uklsplat, end_time_uklsplat));
+
+
+//   if maincaunter=20 then
+//    log ('то место');
+
+//   if maincaunter mod 20 = 0 then
+//                               Application.ProcessMessages;
+
+   maincaunter:=maincaunter+1;
+
+
+  end; // main loop
+
+
+ vrb.adg_sigma_avg := (vrb.adg_chislitel / vrb.adg_kol);
+ log ('Среднее значение коэф. сцепления равно = ' + floattostr(vrb.adg_sigma_avg));
+ logreport ('Среднее значение коэф. сцепления равно = ' + floattostr(vrb.adg_sigma_avg));
+
+
+
+ log ('Было уложено ' + inttostr(maincaunter-1)+' сплэтов');
+ logReport ('Было уложено ' + inttostr(maincaunter-1)+' сплэтов');
+
+
+ LogRec.NR := maincaunter-1;
+
+
+ logt(2,0);
+ logt(2,0);
+
+ QueryPerformanceCounter(end_time_mkcoat);
+ log( 'Время создания покрытия: '+ floattostr( trunc(((end_time_mkcoat - begin_time_mkcoat)/freq_HRT_mkcoat)*10)/10            ) + ' с');
+ logreport( 'Время создания покрытия: '+ floattostr( round(((end_time_mkcoat - begin_time_mkcoat)/freq_HRT_mkcoat)*10)/10 /60           ) + ' мин');
+
+ LogRec.Time := round(((end_time_mkcoat - begin_time_mkcoat)/freq_HRT_mkcoat)/60) ;
+
+
+ logt2(1,'#create_cover');
+ logt(1,timeclc(freq_HRT_mkcoat, begin_time_mkcoat, end_time_mkcoat));
+
+
+ // dump(10);
+
+ //complexLog('');
+
+//---------------------------------------------------------------------------------------------------------------------------------------
+
+ QueryPerformanceFrequency(freq_HRT_analiz);
+ QueryPerformanceCounter(begin_time_analiz);
+
+ AnalizPokritiya;
+
+ QueryPerformanceCounter(end_time_analiz);
+ log( 'Анализ покрытия '+ floattostr( trunc(((end_time_analiz - begin_time_analiz)/freq_HRT_analiz)*1000*1000*10)/10            ) + ' мкс.');
+ logreport( 'Анализ покрытия '+ floattostr( trunc(((end_time_analiz - begin_time_analiz)/freq_HRT_analiz)*1000*1000*10)/10 /60/60           ) + ' мин');
+
+ logt2(1,'#analiz');
+ logt(1,timeclc(freq_HRT_analiz, begin_time_analiz, end_time_analiz));
+
+ //}
+//---------------------------------------------------------------------------------------------------------------------------------------
+
+
+// complexLog('');
+
+
+//---------------------------------------------------------------------------------------------------------------------------------------
+
+ if (ReadIniDataInt('slise','on_shlif', 1) = 1) and (iniVar.srez_interval > 0) then
+   begin
+    QueryPerformanceFrequency(freq_HRT_srez);
+    QueryPerformanceCounter(begin_time_srez);
+    droptoslise2;
+    QueryPerformanceCounter(end_time_srez);
+    log( 'Время создания шлифов: '+ floattostr( trunc(((end_time_srez - begin_time_srez)/freq_HRT_srez)*10)/10            ) + ' с');
+    logreport( 'Время создания шлифов: '+ floattostr( trunc(((end_time_srez - begin_time_srez)/freq_HRT_srez)*10)/10 /60           ) + ' мин');
+
+    logt2(1,'#shlifi');
+    logt(1,timeclc(freq_HRT_srez, begin_time_srez, end_time_srez));
+ end;
+ //}
+//---------------------------------------------------------------------------------------------------------------------------------------
+
+
+  // Расчет адгезии:
+
+//  vrb.adg_s_pokritiya := 0;
+
+//
+//  for j:=iniVar.obrezka to vrb.fild_y-iniVar.obrezka do
+//   begin
+//     for i:=iniVar.obrezka to vrb.fild_x-iniVar.obrezka do
+//       begin
+//         if cup[j,i] > 1 then
+//           begin
+//             vrb.adg_s_pokritiya:=vrb.adg_s_pokritiya+1;
+//           end;
+//
+//       end;
+//   end;
+
+  vrb.adg_s_pokritiya:=vrb.adg_kol + vrb.adg_kol_v_splete_nekontakt;
+
+  if vrb.adg_kol > vrb.adg_s_pokritiya then
+                                    ShowMessage('Лажа ! Количество точек пороконтактир с поверхностью всегде меньше общего кол-ва');
+
+
+  vrb.adg_koef_kontakta:= vrb.adg_kol / vrb.adg_s_pokritiya; //коэф контакта
+
+  log ('Коэф. контакта покрытия с подложкой ' + floattostr(vrb.adg_koef_kontakta * 100) +'%');
+  logreport ('Коэф. контакта покрытия с подложкой ' + floattostr(vrb.adg_koef_kontakta * 100) +'%');
+  LogRec.Adg2 := vrb.adg_koef_kontakta * 100;
+
+  vrb.adg := vrb.adg_chislitel / vrb.adg_s_pokritiya;
+
+  LogRec.Adg1 := vrb.adg / vrb.adg_koef_kontakta;
+  log ('Адгезионный коэффициент  ' + floattostr(LogRec.Adg1) + '');
+  logreport ('Адгезионный коэффициент  ' + floattostr(LogRec.Adg1) + '');
+
+
+
+
+
+  LogRec.adg := vrb.adg;
+  log ('Адгезия равна: ' + floattostr(vrb.adg) +'');
+  logreport ('Адгезия равна: ' + floattostr(vrb.adg) +'');
+
+
+
+  LogRec.formula := iniVar.tip_materiala;
+  LogRec.polaya := iniVar.polaya_chastica;
+
+
+
+
+//  adg_koef_kontakta * (vrb.adg_chislitel / vrb.adg_kol);
+
+
+
+ QueryPerformanceCounter(end_time_prgstrt);
+ log( 'Время выполнения программы '+ floattostr( trunc(((end_time_prgstrt - begin_time_prgstrt)/freq_HRT_prgstrt)*10)/10            ) + ' сек');
+ logreport( 'Время выполнения программы '+ floattostr( round(((end_time_prgstrt - begin_time_prgstrt)/freq_HRT_prgstrt)*10)/10 /60 /60           ) + ' часов');
+ logt2(1,'#all_time_of_works');
+ logt(1,timeclc(freq_HRT_prgstrt, begin_time_prgstrt, end_time_prgstrt));
+
+ logt2(2,'');
+ logt2(2,'');
+ logt2(2,'');
+ logt2(2,'');
+ logt2(2,'');
+ logt2(2,'');
+ logt2(2,'');
+
+ complexLog('');
+
+ SaveArh;
+
+
+   {$ENDREGION}
+
+end;
+
+
+
+
