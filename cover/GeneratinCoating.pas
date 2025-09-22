@@ -459,6 +459,7 @@ begin
 //              crkl_volume : real;
 
 
+   //сразу же залогируем главные данные по сплэту для истории. в лог пишем оба возможных варианта параметров сплэта для цилиндра и для гладкого сплэта
    log ('');
    log ('');
 
@@ -481,6 +482,10 @@ begin
 
    log ('');
 
+   //в более важном кратком логе, нам про каждый сплэт не надо. достаточно по два сплэта от каждого слоя:
+   // 1) это параметры сплэта когда не забыли подложку (можно взять первый укладываемый)
+   // 2) это когда забыли подложку   (тут по флажку действуем, если взвелся то мы встретили такой сплэт и надо залогировать один раз)
+
    if maincaunter = 1 then
       begin
         logreport ('');
@@ -494,8 +499,6 @@ begin
         logreport ('');
 
         LogRec.Rs1 := vrb.crkl_Rs_OP;
-
-
       end;
 
 
@@ -515,10 +518,10 @@ begin
       end;
 
 
-
+   //если у нас режим цилиндрических сплэтов тогда берем из переменных по методу ОП, иначе по методу Иордана
    if iniVar.splattype = 0 then // OP
      begin
-      vrb.crkl_Rp_1     := vrb.crkl_Rp_OP;
+      vrb.crkl_Rp_1     := vrb.crkl_Rp_OP; //это рабочие переменные с размером частицы, сплэта и толщины.
       vrb.crkl_Rs_1     := vrb.crkl_Rs_OP;
       vrb.crkl_height_2 := vrb.crkl_height_OP; //толщина расчетная
      end            else //  J
@@ -528,7 +531,7 @@ begin
       vrb.crkl_height_2 := vrb.crkl_height_OP; //потом подменим
      end;
 
-
+   //и еще логи
    logk (maincaunter, vrb.crkl_center_x, vrb.crkl_center_y, vrb.crkl_Rs_1, vrb.crkl_Rp_1);
    vrb.last_crkl_height := vrb.crkl_height_2;
 
@@ -543,7 +546,7 @@ begin
    s:='#;'+inttostr(maincaunter)+';Cx=;'+inttostr(vrb.crkl_center_x)+';Cy=;'+inttostr(vrb.crkl_center_y)+';Rp=;'+inttostr(vrb.crkl_Rp_1)+';Rs=;'+inttostr(vrb.crkl_Rs_1)+';hs=;'+floattostr(vrb.crkl_height_2)+';';
    log3(s);
 
-
+   //если вдруг оказалось что радиус сплэта больше чем максимальный радиус в шаблоне узловых точек (ШУТ) см. дисер, то надо шаблончик увеличить!
    if vrb.crkl_Rs_1 > vrb.max_radius*2-1 then // перестраховочка
                                       begin
                                         s:='@@@@ Перестраховка сработала !!!!  Rs вышел за пределы максимального размера шаблона! увеличиваем шаблон';
@@ -556,7 +559,7 @@ begin
                                         //iniVar.Ds_max_d
                                       end;
 
-
+   //какой то отладочный рудимент остался. видно просто данные для отладки были что бы знать параметры других сплэтов при отладке
    if (maincaunter = 1) then
        begin
          vrb.first_x  := vrb.crkl_center_x;
@@ -580,26 +583,30 @@ begin
 //==============================================================================
 //                      Выделяем область из массива fild   Это будет subfild
 //==============================================================================
-
-   vrb.start_subfild_x := vrb.crkl_center_x - vrb.crkl_Rs_1 - 1 - 1;        //чуть больше для сплайна
+   // вот тут мы поехали вырезать кусок из fild - это профиль итоговой поверхности с цветами, который потом в 3Д сцене будет и запихивать его в рабочий массив
+   //сначала размеры посчитаем. прямоугольник выпиливаем стакой то стартовой координаты и до такой то конечной координаты
+   vrb.start_subfild_x := vrb.crkl_center_x - vrb.crkl_Rs_1 - 1 - 1;        //чуть больше для сплайна. раньше добавляли в массив точек но потом убрали, но тут осталось
    vrb.start_subfild_y := vrb.crkl_center_y - vrb.crkl_Rs_1 - 1 - 1;
 
    vrb.end_subfild_x := vrb.crkl_center_x + vrb.crkl_Rs_1 + 1 + 1 + 1;
    vrb.end_subfild_y := vrb.crkl_center_y + vrb.crkl_Rs_1 + 1 + 1 + 1;
 
-
+   //тут проверка еще раз не вышли ли за пределы массива!
    if (vrb.start_subfild_x < 0) OR (vrb.start_subfild_y < 0) OR
       (vrb.end_subfild_x > inivar.fild_size_x_d) OR
       (vrb.end_subfild_y > inivar.fild_size_y_d)
    then
     begin
+      //многие сообщения которых пользователь не должен видеть с матами. если вылезло по тексту точно знаешь, где косяк
       ShowMessage('Сработала защита, magic вернул лажу.');
     end;
 
    log ('start_subfild_x='+inttostr(vrb.start_subfild_x) + '; start_subfild_y=' +inttostr(vrb.start_subfild_y));
 
 
-  // корректировка чтоб не вылазило за поле
+  // корректировка чтоб не вылазило за поле. еще перестраховка, их много в коде еще будет...
+  // просто когда код часто меняется, а есть места где на отсутствие такой ситуации закладывался,
+  // то лучше уж словить ошибку сразу, чем потом думать откуда плохие результаты
    if vrb.start_subfild_x <= 0 then
                                 vrb.start_subfild_x := 1;
    if vrb.start_subfild_y <= 0 then
@@ -608,16 +615,20 @@ begin
    if vrb.end_subfild_x > inivar.fild_size_x_d then vrb.end_subfild_x := inivar.fild_size_x_d;
    if vrb.end_subfild_y > inivar.fild_size_y_d then vrb.end_subfild_y := inivar.fild_size_y_d;
 
+
+
    //---- тогда выделеное поле будет размеров от [0 до subfild_size_x] включительно
    vrb.subfild_size_x := vrb.end_subfild_x - vrb.start_subfild_x;
    vrb.subfild_size_y := vrb.end_subfild_y - vrb.start_subfild_y;
 
+   //и второй временный массив можно такого же размера делать...
    vrb.subfild2_size_x := vrb.subfild_size_x;
    vrb.subfild2_size_y := vrb.subfild_size_y;
 
 //==============================================================================
 //                    Вычисляем subкоординаты окружности
 //==============================================================================
+   //координаты центра сплэта у нас были, но они в размерах fild, а тут в коодринатах subfild, приблизительно середина subfild
    vrb.sub_crkl_center_x := vrb.crkl_center_x - vrb.start_subfild_x;
    vrb.sub_crkl_center_y := vrb.crkl_center_y - vrb.start_subfild_y;
  // vrb.sub_crkl_Rp:=vrb.crkl_Rp_1;
@@ -626,10 +637,16 @@ begin
 //==============================================================================
   {$ENDREGION}
 
+  //это будем считать точки разных типов в сплэте, дальше будет понятнее
   vrb.kol_k0:=0; vrb.kol_k1:=0; vrb.kol_k2:=0; vrb.kol_k3:=0;
 
+  //а это радиус ядра = радиус сплэта на коэфициент
   vrb.fRp := round (vrb.crkl_Rp_1 * iniVar.krp);
+
+  //но радиус ядра не может быть больше радиуса сплэта, мало ли что там пользователь за коэфициент ввел...
   if vrb.fRp > vrb.crkl_Rs_1 then vrb.fRp:=vrb.crkl_Rs_1;
+
+  //но и супер маленьким ядро быть не может
   if vrb.fRp < 2 then vrb.fRp:=2;
 
   logt2(1,'#pre_analiz');
@@ -639,6 +656,7 @@ begin
   {$REGION 'Предзаливка'}
   // Подготовка: первый статистический прогон.
 
+  //почиситим количества перед счетом...
   kolcentr := 0;
   kolperef := 0;
   kolkolco := 0;
@@ -648,34 +666,45 @@ begin
   QueryPerformanceFrequency(freq_HRT_poisk_min);
   QueryPerformanceCounter(begin_time_poisk_min);
 
+  // от нулевого радиуса до радиуса сплэта
   for j:=0 to vrb.crkl_Rs_1 do
     begin
-      for i:=Low(shablon_array[j]) to High(shablon_array[j]) do
+      for i:=Low(shablon_array[j]) to High(shablon_array[j]) do //идем по массиву шаблона узловых точек (ШУТ)
         begin
+          //вообще в ШУТ точки окружности упорядочены не только по радиусам, но и по углам для каждого радиуса.
+          //получается это типа обхода по точкам по окружности по одному радиусу (кажется по часовой стрелке с позиции то ли 0 толи 90 градусов)
+          //в шаблоне все точки уже в дискретных координатах
+          //причем в ШУТ точки не повторяются и нет "дыр", т.е. это сплошной обход всех точек будущего сплэта, только в особом порядке
 
+          //ШУТ имеет в себе координаты точек относительно нуля, а у нас ноль это центр окружности в координатах subfild
           voln_y:=shablon_array[j,i].y + vrb.crkl_center_y;
           voln_x:=shablon_array[j,i].x + vrb.crkl_center_x;
 
+          //тут поиск минимума максимума в поверхности под сплэтом. берем первую точку как мин и макс и потом правим если встретили выше или ниже
           if (i=0) AND (j=0) then
                               begin
                                 minincenter := fild [voln_y, voln_x].z;
                                 maxincenter := fild [voln_y, voln_x].z;
                               end;
 
+          //если радиус меньше радиуса ядра. т.е. мы в ядре,
           if j<vrb.fRp then
                          begin
+                           //то продолжаем искать минимум и максимум высоты в массиве поверхности
                            if maxincenter < fild [voln_y,voln_x].z then maxincenter := fild [voln_y,voln_x].z;
                            if minincenter > fild [voln_y,voln_x].z then minincenter := fild [voln_y,voln_x].z;
+
+                           //счетчик точек центар
                            kolcentr:=kolcentr+1;
                          end
                         else
                          begin
                            if j = vrb.fRp then // кольцо растекания - переломная черта, с нее начинается периферия
                                            begin
-                                             kolkolco := kolkolco+1;
+                                             kolkolco := kolkolco+1; //это счетчик точек кольца
                                            end;
 
-                           kolperef:=kolperef+1;
+                           kolperef:=kolperef+1; //ну а это переферийная часть. причем кольцо часть переферии
                          end;
 
         end;
@@ -688,27 +717,37 @@ begin
 
   {$REGION 'Расчет объема капли и ее распределения'}
   // Расчет объема капли !
+  // в дискретах
 
-  if iniVar.splattype = 0 then particlevolume := (kolperef+kolcentr) * vrb.crkl_height_OP  // OP
-                          else particlevolume := vrb.crkl_volume;                          //  J
+  if iniVar.splattype = 0 then particlevolume := (kolperef+kolcentr) * vrb.crkl_height_OP  // ОП - тут просто площадь сплэта в дискретах на высоту сплэта
+                          else particlevolume := vrb.crkl_volume;                          // Иордан - тут сложнее считается в другом месте
 
 //  particlevolume := vrb.crkl_volume;
 //  vrb.crkl_height_3 := particlevolume / (kolperef+kolcentr);
 
+//тут запихать в переменную структуры
   vrb.PolniyObemKapli := particlevolume;
 
-  if iniVar.splattype = 0 then vrb.IshodnayaH := particlevolume / (kolperef+kolcentr)  // OP
-                          else vrb.IshodnayaH := vrb.crkl_height_2;                    //  J
+  //а тут получается считается толщина из объема.
+  // кажется будто это бред туда сюда считать, но тут решается проблема как перейти от непрерывного простанства к дисретному
+  // т.е. площадь окружности и полощадь окружности из квадратиков (дискрет), как на листочке в клеточку разная.
+  // это типа объем реального человека и соответстующего ему человека в майнкрафте отличается и надо корректно все пересчитать чтоб размер не поменялся
+  if iniVar.splattype = 0 then vrb.IshodnayaH := particlevolume / (kolperef+kolcentr)  // метод ОП
+                          else vrb.IshodnayaH := vrb.crkl_height_2;                    // метод Иордана - гладкий сплэт. тут надо понимать, что он хоть и гладкий
+                                                                                       // т.е толщина меняется, но условно у него толщина есть и она постоянная кое где
+                                                                                       // такое нужно т.к. методика писалась под цилиндрический сплэт, а потом правилась
 
   log ('Объем частицы реальный (исходя из точного радиуса)' + floattostr(vrb.crkl_volume) + ' дск^3        vrb.crkl_volume');
   log ('Объем частицы округленный (исходя из дискретизованной окружности)' + floattostr(particlevolume) + ' дск^3       particlevolume');
   log ('Исходная толщина' + floattostr(vrb.IshodnayaH) + ' дск^3        vrb.IshodnayaH');
 
 
+  //тут будем считать объем потом
   sum_volume:=0;
 
 //  tipa_Rp:=step(8,1/3);
 
+  //это условный радиус капли в дискретах
   tipa_Rp:=trunc(step(particlevolume*3/(4*PI),1/3));
 
 
@@ -717,31 +756,45 @@ begin
 
   QueryPerformanceFrequency(freq_HRT_make_volume_array);
   QueryPerformanceCounter(begin_time_make_volume_array);
+
+  //погнали обрабатывать все точки ядра от центра
   for j:=0 to vrb.crkl_Rp_1 do
     begin
+      //по ШУТ
       for i:=Low(shablon_array[j]) to High(shablon_array[j]) do
         begin
 
+          //координаты точки
           vrem_y:=shablon_array[j,i].y + vrb.crkl_Rs_1;
           vrem_x:=shablon_array[j,i].x + vrb.crkl_Rs_1;
 
           //subfild3 [vrb.crkl_Rs+shablon_array[j,i].y, vrb.crkl_Rs-shablon_array[j,i].x].z :=
 //          tempreal := vrb.crkl_Rs*vrb.crkl_Rs  -  sqr(shablon_array[j,i].x-vrb.crkl_Rs)  -  sqr(shablon_array[j,i].y-vrb.crkl_Rs);
 //          tempreal := vrb.crkl_Rs*vrb.crkl_Rs  -  sqr(shablon_array[j,i].x)  -  sqr(shablon_array[j,i].y);
+
+          //это удаленность точки от центра окружности раположенного в нуле координат . Формула L^2 = (x-0)^2 + (y-0)^2  и разница L^2 с Rp^2
           tempreal := tipa_Rp*tipa_Rp  -  sqr(shablon_array[j,i].x)  -  sqr(shablon_array[j,i].y);
 
-          if tempreal >= 0 then // Значит это внутри окружности
+          if tempreal >= 0 then // Значит это внутри окружности.
                     begin
+                      //скоприровать в subfild3 в значение высоты это L (помним что оно было в квадрате выше поэтому извлечем корень)
+                      // а вот это не помню... потом вернусь к этому месту перепишу коментарии
+
+                      //суть в том, что это число это объем который мы откусываем от объема частицы
                       subfild3 [vrem_y, vrem_x].z := 2*sqrt(tempreal);
 
+                      //если объема частицы уже нет (кончился) т.е. на заливку ядра не хватит объема капли...
                       if particlevolume - subfild3 [vrem_y, vrem_x].z  <= 0 then
                         begin
                           log ('Теория с треском проволилась, это число больше!!!!!');
-                          subfild3 [vrem_y, vrem_x].z := 0;
+                          subfild3 [vrem_y, vrem_x].z := 0; //откусывать нечего.... объема нет
                         end
                       else
                         begin
+                          //уменьшить объем частицы на израсходованный объем
                           particlevolume := particlevolume - subfild3 [vrem_y, vrem_x].z;
+
+                          //ну и счетчик объема увеличить на эту величину
                           sum_volume := sum_volume + subfild3 [vrem_y, vrem_x].z;
                         end;
                     end;
@@ -771,6 +824,7 @@ begin
 
   // Создаем массив - список под кольцо.
   try
+    //это массив высот! там создадим карту высот по границе ядра. они потом потребуются...
     setlength (hmap, kolperef+1); // 1 на всякий случай             !!!!!!!!!! модернизировать, памяти надо больше = kolperef
   except
     log ('Нехватает памяти для создания массива среза ядра по высоте (hmap)');
@@ -784,48 +838,78 @@ begin
 
   // проходим по кольцу что бы найти все уникальные вершины и упорядочить их по возрастанию
   kolinhmap := 0;
-  for k := 0 to kolkolco - 1 do
+  for k := 0 to kolkolco - 1 do // от 0 до точек в кольце.
     begin
-      j := vrb.fRp;
+      j := vrb.fRp;  //это по сути тот же обход по ШУТ, только тут берем один радиус т.е. цикла по j нет...
 
+      // ну это координаты точки
       voln_y:=shablon_array[j,Low(shablon_array[j])].y + vrb.crkl_center_y;
       voln_x:=shablon_array[j,Low(shablon_array[j])].x + vrb.crkl_center_x;
 
+      //будем искать высоты
       tempmin := fild [voln_y,voln_x].z;
 
+
+      //тут надо пояснить суть массива высот. это перечень высот в кольце, причем все высоты уникальные
+      //и идут по размерам. допустим в кольце идут высоты 1, 5, 2, 2.1, 3, 3, 7
+      //мы смотрим что у нас уникального есть: 1, 5, 2, 3 и 7.
+      // 2 и 2.1 считаем как одно и то же т.к. они близкие числа. близкое число или нет
+      // определяет константа zero, если она 0.2, то 2, 2.1, 2.2 это тоже что и 2.
+      // это фильтр по Z у нас пространство непрерывное, там могут быть высоты с
+      // с микроразницей, это хоть как то уменьшает количество высот за счет
+      // фильтрации похожих значений
+      // ну мало что уникальные надо еще их по высоте их упорядочить 7,5,3,2,1
+      // ну и пока делаем посчитать сколько их реально получилось т.к. выделяли память по максимуму
+      // если все значения кольца уникальные
+
+
+
+
+      //  точку Low мы взяли за tempmin, а перебираем с Low+1 и до конца
+      //
       for i:=Low(shablon_array[j])+1 to High(shablon_array[j]) do
         begin
+          //кординаты точки
           voln_y:=shablon_array[j,i].y + vrb.crkl_center_y;
           voln_x:=shablon_array[j,i].x + vrb.crkl_center_x;
-          if k>0 then
-                   begin
+
+
+          if k>0 then //тут надо смотреть есть ли уже массиве высот что то или нет
+                   begin //если есть
+                     //если минимальная высота меньше чем у предидущей точки + 0 (тут реально это zero это почти ноль 10^-9)
+                     //текущая высота больше чем высот передыдущей точки, тогда сохранить ее как максимальную
                      if (tempmin <= hmap[k-1]+zero) AND (fild [voln_y,voln_x].z > hmap[k-1]+zero) then
                                                                                                     tempmin := fild [voln_y,voln_x].z;
-
+                     //если высота больше чем текущая и больше чем пердидущая то сохраним ее
                      if (tempmin > fild [voln_y,voln_x].z) AND (fild [voln_y,voln_x].z > hmap[k-1]+zero)  then
                                                                                                             tempmin := fild [voln_y,voln_x].z;
                    end
                  else
-                   begin
+                   begin //если выше чем первая, тогда сохраняем её
                      if (tempmin > fild [voln_y,voln_x].z) then
                                                             tempmin := fild [voln_y,voln_x].z;
                    end;
         end;
 
+      //если первая точка
       if k=0 then
               begin
+                //число точек в массиве высот границы ядра увеличим на одну точку
                 kolinhmap:=kolinhmap+1;
+
+                //заполним эту точку текущей максимальной высотой
                 hmap[k]:=tempmin;
               end
              else
               begin
-                if hmap[k-1]+zero < tempmin then
-                                              begin
+                if hmap[k-1]+zero < tempmin then //если найденная выше чем была найдена до этого
+                                              begin //сохранить
                                                 hmap[k]:=tempmin;
                                                 kolinhmap:=kolinhmap+1;
                                               end
                                             else
-                                              begin
+                                              begin //новая нефига не выше... значит более высоких нет,
+                                                //массив сформирован тормозим
                                                 Break;
                                               end;
               end;
