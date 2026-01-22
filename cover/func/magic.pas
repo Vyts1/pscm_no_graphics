@@ -15,6 +15,8 @@ begin
   k := 0;
   repeat
     k:=k+1;
+    //ShowMessage('kol_9cheek_x: '+floattostr(kol_9cheek_x));
+    //ShowMessage('kol_9cheek_y: '+floattostr(kol_9cheek_y));
     tempvalue := random(kol_9cheek_x * kol_9cheek_y);
 
     if length(random_karta)<=tempvalue then
@@ -74,6 +76,17 @@ var
     scen:integer;
     zabili_podlojku:boolean;
 
+    //chetnaya_chastica:boolean;  // переменные для норм. распределения
+    radius_norm_ras: double;    // переменные для норм. распределения
+    //fi_norm_ras: double;        // переменные для норм. распределения
+    max_fi_norm_ras: double;    // переменные для норм. распределения
+    x_center_norm_ras, y_center_norm_ras: double;  // переменные для норм. распределения
+
+
+    //ds_abs_int:integer;
+    //fild_size_x_real:real;
+    //fild_size_y_real:real;
+
     tmp : integer;
 
     hpronikn:real;
@@ -92,6 +105,10 @@ end;
 begin
 
   danger:=0;
+  //chetnaya_chastica := false;
+  max_fi_norm_ras := pi;
+  x_center_norm_ras := iniVar.fild_size_x_d/2;
+  y_center_norm_ras := iniVar.fild_size_y_d/2;
 
   repeat
 
@@ -108,6 +125,11 @@ begin
     //iniVar.dpmin_abs
     //iniVar.dpmax_abs
 
+    //ShowMessage('tp_stddev: '+floattostr(tp_stddev));
+
+    up_stddev := 0;
+    tp_stddev := 0;
+
     case iniVar.sposob_vvoda of
       0,1: //Это классический способ генерации
          begin
@@ -116,7 +138,7 @@ begin
            dp_abs:=NRand ( iniVar.dpmin_abs+dp_stddev/2, dp_stddev, iniVar.dp_stdiv);
 
            up_abs:=NRand ( iniVar.velos_min+up_stddev/2, up_stddev, iniVar.up_stdiv);
-
+           //ShowMessage('up_abs: '+floattostr(up_abs));
          end;
         2: //Это гистограммный
          begin
@@ -142,11 +164,11 @@ begin
     up_stddev:=(iniVar.velos_max-iniVar.velos_min);
     tp_abs:=NRand ( iniVar.temp_patic_min+tp_stddev/2, tp_stddev, iniVar.tp_stdiv);
 
+    //ShowMessage('tp_stddev: '+floattostr(tp_stddev));
 
     log ('dp='+floattostr(dp_abs)+' мкм');
     log ('tp='+floattostr(tp_abs)+' К');
     log ('up='+floattostr(up_abs)+' м/с');
-
 
 
     Tp0:=tp_abs;
@@ -171,6 +193,11 @@ begin
                            h_abs, Ds_abs, scen,
                            hpronikn, SplatNum);
 
+
+        //h_abs := (1 - (0.44 * Power(((2.698e3*(iniVar.velos_max * iniVar.velos_max))/56e7), 1/3))) * dp_abs;
+        //Ds_abs := Sqrt(1/h_abs);
+        //SplatNum := 1;
+
              end;
          1 : begin
              //  log ('Используем расчет по формеле оксидов');
@@ -190,9 +217,12 @@ begin
                            h_abs, Ds_abs, scen, iniVar.VolCon,
                            iniVar.formula,
                            hpronikn, SplatNum);
-
              end;
       end;
+
+     //Ds_abs := Ds_abs;
+    //ds_abs_int := upround(Ds_abs * 1000000);
+    //ShowMessage('Ds_abs: '+inttostr(ds_abs_int));
 
 
 //procedure advcalculator     (zabili_podlojku: boolean;
@@ -300,7 +330,6 @@ begin
           end;
 
 
-
         h_abs  := h_abs  * 1000000;
         Ds_abs := Ds_abs * 1000000;
         //теперь все в мкм
@@ -343,6 +372,7 @@ begin
         Vol := (4/3) * PI* step(Dp_abs/iniVar.diskret_x/2, 3); //   4/3 * PI R^3
 
 
+
         // теперь конвертим в метод J
         crkl_Rp_J      := round(Dp_abs/iniVar.diskret_x/2);
         crkl_Rs_J      := round(Ds_abs/iniVar.diskret_x/2);
@@ -351,6 +381,7 @@ begin
         crkl_Rp_OP :=   crkl_Rp_J;
         crkl_Rs_OP     := round(Ds_abs/iniVar.diskret_x/2);
         crkl_height_OP := crkl_height_J * 2 / 3;
+
 
 //        RsJ >> RsOP
         if crkl_Rs_OP > crkl_Rs_J then
@@ -376,8 +407,47 @@ begin
               begin
                 if  NOT zabili_podlojku then  findkvadrat ( kx, ky );
 
-                vrb.crkl_center_x := upround(vrb.max_subfild_size_x/2) +  tochek_in_x * kx + random (tochek_in_x);
-                vrb.crkl_center_y := upround(vrb.max_subfild_size_y/2) +  tochek_in_y * ky + random (tochek_in_y);
+                //ShowMessage('random (tochek_in_x): '+floattostr(tochek_in_x));
+                //ShowMessage('random (tochek_in_y): '+floattostr(tochek_in_y));
+
+                //vrb.crkl_center_x := upround(vrb.max_subfild_size_x/2) +  tochek_in_x * kx + random (tochek_in_x);
+                //vrb.crkl_center_y := upround(vrb.max_subfild_size_y/2) +  tochek_in_y * ky + random (tochek_in_y);
+
+                //ShowMessage('max_subfild_size_x: '+inttostr(vrb.max_subfild_size_x));
+                //ShowMessage('max_subfild_size_y: '+inttostr(vrb.max_subfild_size_y));
+
+                vrb.crkl_center_x := upround(NRand(iniVar.fild_size_x_d/2, iniVar.fild_size_x_d, 0.15));
+                vrb.crkl_center_y := upround(NRand(iniVar.fild_size_y_d/2, iniVar.fild_size_y_d, 0.15));
+
+                //if  maincaunter <= 200000 then
+                //  begin
+                //    vrb.crkl_center_x := upround(NRand(3000, 6000, 0.15));
+                //    vrb.crkl_center_y := upround(NRand(3000, 6000, 0.15));
+                //    //WriteLn('Напыляется 1-ый гауссоид!')
+                //  end
+                //else if (maincaunter > 200000) and (maincaunter <= 400000) then
+                //  begin
+                //    vrb.crkl_center_x := upround(NRand(6000, 6000, 0.15));
+                //    vrb.crkl_center_y := upround(NRand(3000, 6000, 0.15));
+                //   //WriteLn('Напыляется 2-ый гауссоид!')
+                // end
+                //else if (maincaunter > 400000) and (maincaunter <= 600000) then
+                //  begin
+                //    vrb.crkl_center_x := upround(NRand(9000, 6000, 0.15));
+                //    vrb.crkl_center_y := upround(NRand(3000, 6000, 0.15));
+                //    //WriteLn('Напыляется 3-ый гауссоид!')
+                //  end;
+                //else if (maincaunter > 600000) and (maincaunter <= 800000) then
+                //  begin
+                //    vrb.crkl_center_x := upround(NRand(3000, 6000, 0.15));
+                //    vrb.crkl_center_y := upround(NRand(9000, 6000, 0.15));
+                //    //WriteLn('Напыляется 4-ый гауссоид!')
+                //  end;
+
+
+
+
+                //WriteLn('Координаты: (', vrb.crkl_center_x, '; ', vrb.crkl_center_y, ')');
 
                 //vrb.crkl_center_x := random (iniVar.fild_size_x_d-2*crkl_Rs-10)+crkl_Rs+5;
                 //vrb.crkl_center_y := random (iniVar.fild_size_y_d-2*crkl_Rs-10)+crkl_Rs+5;
@@ -389,7 +459,7 @@ begin
                         (crkl_center_y+crkl_Rs_OP < iniVar.fild_size_y_d - 4) AND
                         (crkl_center_x-crkl_Rs_OP > 4) AND
                         (crkl_center_y-crkl_Rs_OP > 4))
-                     then  showmessage('Залет');
+                     then  WriteLn('Залет!');//showmessage('Залет');
                   end            else // J
                   begin
                      if NOT(
@@ -397,7 +467,7 @@ begin
                         (crkl_center_y+crkl_Rp_J < iniVar.fild_size_y_d - 4) AND
                         (crkl_center_x-crkl_Rp_J > 4) AND
                         (crkl_center_y-crkl_Rp_J > 4))
-                     then  showmessage('Залет');
+                     then  WriteLn('Залет!');//showmessage('Залет');
                   end;
 
 

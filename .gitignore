@@ -1,0 +1,6 @@
+__history/
+.*log.*
+cash/
+rez/
+.*csv
+Report_File.diz

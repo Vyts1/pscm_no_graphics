@@ -766,6 +766,8 @@ begin
 
       Ds_vozvr:=DSD;
 
+      //ShowMessage('Ds_vozvr: '+floattostr(Ds_vozvr));
+
       ABS:=LBS/(ROBS*CBS);
       glub_pronikn := 4*sqrt(TDspl*ABS);
 
@@ -977,7 +979,10 @@ AWB   :=basemat.m_AW;
       PeFos:=PE*FOS;
 //      Memo1.Lines.Add (  floattostr(FOS) + ' ' + floattostr(TAUS) + ' ' + floattostr(PeFos) + ' ' + floattostr(HP) + ' ' + floattostr(HB) + ' ' + floattostr(TK0) + ' ' + floattostr(TK));
 
-      DS:=SQRT(2./(3.*HP));
+      //DS:=SQRT(2./(3.*HP)); // формула ОП Солоненко
+      HP := (1 - (0.44 * Power(((2.698e3*(iniVar.velos_max * iniVar.velos_max))/hardness), 1/3)));
+      DS:= Sqrt(1/HP); // формула Иордана (нормированная)
+
       DSD:=DP*DS;
       HPD:=HP*DP;
 //      Memo1.Lines.Add ( 'COMPUTED VALUES DSD,HPD (m) AND DS,HP (nondimens.)');

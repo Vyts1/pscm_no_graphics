@@ -26,6 +26,6 @@ function GetJRs (h,Rp:real):real;
 var v:real;
 begin
   V := (4/3) * PI*Rp*Rp*Rp;
-  GetJRs := Rp * sqrt( 2*Rp / h);
+  GetJRs := Rp * sqrt( 2*Rp / h); // GetJRs := Rp * sqrt( 1 / hs); hs - норм. толщина сплета
 end;
 
