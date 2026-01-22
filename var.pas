@@ -116,7 +116,7 @@ var
     general_step :integer;
     grid_data_max, grid_data_min :real;
 
-
+    hardness:real;
 //    dupo, dDpo:real;
 //    tpo, tbo, upo, Dpo:real;
 

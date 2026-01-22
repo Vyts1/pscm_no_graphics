@@ -267,7 +267,10 @@ begin
 //--------------------------------------
   lreturn:
       tracks := tracks + '*30';
-      Tc := TTK*TPM;
+      //Tc := TTK*TPM;
+      //WriteLn(Tc);
+      // температура контакта для холодного напыления
+      Tc := 600;
 
 //      vrb.Tc:=TTK*TPM;
 
@@ -278,11 +281,16 @@ begin
 			V := 1.0e13;
       const_k := 1.38e-23/1.60219e-19;
       TDspl:= ((DP*DP)/(APL)) * FOS ;  //поправить
+      //WriteLn(TDspl);
+
+      TDspl:= 3.2e-8;
+
       t1:=Ea/const_k/Tc;
       t2:=-V*TDspl/exp(t1);
 //      vrb.adg_sigma_i := 1.-exp(-V*TDspl/exp(Ea/const_k/vrb.Tc));
 //      vrb.adg_sigma_i := 1.-exp(t2);
       SigmaI := 1.-exp(t2);
+      //WriteLn(SigmaI);
 
      if (SplatNum = 1) then
         begin

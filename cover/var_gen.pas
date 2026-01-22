@@ -63,7 +63,7 @@ var  // мелкие локальные переменные:
 
   kol_vo_tochek_gde_verh_nije_niza : integer;
 
-
+  //chetnaya_chastica:boolean;
 
   constRsx, BSx:integer;
   constRsy, BSy:integer;
