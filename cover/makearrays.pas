@@ -48,6 +48,9 @@
 
       log ('Создаем массив cup');
       setlength (cup, iniVar.fild_size_y_d+1, iniVar.fild_size_x_d+1);
+
+      log ('Создаем массив fild_impact');
+      setlength (fild_impact, iniVar.fild_size_y_d+1, iniVar.fild_size_x_d+1);
      end;
 
 

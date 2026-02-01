@@ -17,6 +17,11 @@
             sloy:byte;
           end;
 
+  stolk = record          // точка массива fild_impact
+            stolknoveniy:word;
+          end;
+
+
   pair = record           // тип для UP
             s1: real;
             s2: real;
@@ -81,6 +86,7 @@
                         end;
 
   mas = array of  array of versh; //основной массив fild
+  imas = array of  array of stolk; //основной массив fild_impact
 
   kub = array of array of array of pair;
   ckub =array of array of shortint;
@@ -148,6 +154,8 @@
               coat : real;
               is_col: boolean;
 
+              porog_prilipaniya : real;
+              porog_aktivacii : integer;
 
               polaya_chastica: boolean;
 

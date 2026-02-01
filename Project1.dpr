@@ -211,6 +211,14 @@ begin
 
  iniVar.noise:=ReadIniDataReal ('mode', 'noise_fild', 0);    //
 
+ //% активириванных точек что бы считать, что прилипло
+ iniVar.porog_prilipaniya := ReadIniDataReal ('k', 'porog_prilipaniya', 100);    //
+
+ //это количество ударов в точку, что бы считать что точка активирована...
+ iniVar.porog_aktivacii := ReadIniDataInt ('k', 'porog_aktivacii', 20);    //
+
+
+
  if iniVar.noise = 0 then
                              log ('Шума на поверхности нет ')
                           else

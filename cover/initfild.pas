@@ -9,6 +9,7 @@
       fild [j,i].x := mstx(i);
       fild [j,i].y := mstx(j);
       cup [j,i]:=-1;
+      fild_impact[j,i].stolknoveniy := 0;
 
       cv:=1;
 

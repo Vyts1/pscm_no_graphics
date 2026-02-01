@@ -83,6 +83,8 @@
 
 
   fild : mas;     // поле моделирования - плоскость.
+  fild_impact : imas;     // массив хранения для столкновений...
+
   up :kub;
   cup:ckub;  // Это массив для хранения всего объема.
   volna : Tvolna;
@@ -108,6 +110,7 @@
   tochek_in_x, tochek_in_y:integer;
 
   maincaunter:integer;
+  fullcaunter:integer;
 
   LogRec : Tlog;
 

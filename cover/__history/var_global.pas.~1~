@@ -110,3 +110,6 @@
   maincaunter:integer;
 
   LogRec : Tlog;
+
+  chetnaya_chastica:boolean;  // переменные для норм. распределения
+  fi_norm_ras: double; // переменные для норм. распределения

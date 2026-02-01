@@ -7,6 +7,8 @@ var  // мелкие локальные переменные:
 
   A1, B1, a2, b2, c2, d2, CRX, CRY :real;
 
+  estestveniy_otbor : boolean;
+
 
   tmp_x, tmp_y, cv:integer;
 

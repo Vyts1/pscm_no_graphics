@@ -115,7 +115,7 @@
 
 
  except
-//   showmessage ('Ошибка при создании массивов: '+SysErrorMessage(GetLastError));
+   showmessage ('Ошибка при создании массивов: '+SysErrorMessage(GetLastError));
    log ('Ошибка при создании массивов: '+SysErrorMessage(GetLastError));
    log ('Аварийное завершение');
    Application.Terminate;

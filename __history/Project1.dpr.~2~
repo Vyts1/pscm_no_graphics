@@ -30,8 +30,9 @@ uses
   ConvUtils,
   Types,
   MyIni,
-  JPEG,
-  const in 'const.pas';
+  JPEG;
+
+  //const in 'const.pas';
 
 {$I 'const.pas'}
 
@@ -209,7 +210,11 @@ begin
 
 
  iniVar.noise:=ReadIniDataReal ('mode', 'noise_fild', 0);    //
- 
+
+ iniVar.porog_prilipaniya := ReadIniDataReal ('mode', 'noise_fild', 0);    //
+
+
+
  if iniVar.noise = 0 then
                              log ('Шума на поверхности нет ')
                           else
@@ -313,13 +318,13 @@ begin
   iniVar.first_time := 0;
 
 
-  
-  iniVar.dpmin_abs := 50;
-  iniVar.dpmax_abs := 50;
-  iniVar.temp_patic_min := 1360;
-  iniVar.temp_patic_max := 1360;
-  iniVar.velos_min := 400;
-  iniVar.velos_max := 400;
+  hardness := 56e7;
+  iniVar.dpmin_abs := 20;
+  iniVar.dpmax_abs := 20;
+  iniVar.temp_patic_min := 935;
+  iniVar.temp_patic_max := 935;
+  iniVar.velos_min := 800;
+  iniVar.velos_max := 800;
   iniVar.temp_base := 400;
   iniVar.fild_size_X := 4000;
   iniVar.fild_size_Y := 4000;
@@ -329,36 +334,38 @@ begin
   iniVar.a3 := 20;
   iniVar.a4 := 2;
   iniVar.a5 := 2;
-  iniVar.kol_spletov := round(0);
-  iniVar.coat := 100;
-  iniVar.srez_interval := round(10);
+  iniVar.kol_spletov := round(10000);
+  iniVar.coat := 30;
+  iniVar.srez_interval := round(40);
   iniVar.VolCon := 0.05;
   iniVar.incmat := 51; // материал включений
   iniVar.basemat := 16; // материал подложки
   iniVar.modefild := 0; // форма подложки
-  iniVar.partmat := 2; // материал частицы
+  iniVar.partmat := 1; // материал частицы
   iniVar.sposob_vvoda := 0;
-  iniVar.tip_materiala := 2; // формула
-  iniVar.is_col := false; // ограничение по толщине покрытия
+  iniVar.tip_materiala := 0; // формула
+  iniVar.is_col := true; // ограничение по толщине покрытия
   iniVar.formula := 1; // вязкость
   iniVar.koef_9cheek := 0.5;
+
+
   
 
-  iniVar.part_class.m_nId := 3;
-  iniVar.part_class.m_Material := 'Cu';
-  iniVar.part_class.m_ROms := 8940;
-  iniVar.part_class.m_ROml := 8000;
-  iniVar.part_class.m_CPms := 385;
-  iniVar.part_class.m_CPml := 545;
-  iniVar.part_class.m_Lms := 401;
-  iniVar.part_class.m_Lml := 175;
-  iniVar.part_class.m_Tm := 1357;
-  iniVar.part_class.m_TBoil := 2833;
-  iniVar.part_class.m_Lm := 208000;
-  iniVar.part_class.m_MUml := 0.00529999984428287;
-  iniVar.part_class.m_SIGml := 1.28499996662139;
-  iniVar.part_class.m_LBoil := 4820000;
-  iniVar.part_class.m_AW := 63.5;
+  iniVar.part_class.m_nId := 2;
+  iniVar.part_class.m_Material := 'Al';
+  iniVar.part_class.m_ROms := 2500;
+  iniVar.part_class.m_ROml := 2385;
+  iniVar.part_class.m_CPms := 1194;
+  iniVar.part_class.m_CPml := 1080;
+  iniVar.part_class.m_Lms := 220;
+  iniVar.part_class.m_Lml := 94;
+  iniVar.part_class.m_Tm := 933;
+  iniVar.part_class.m_TBoil := 0;
+  iniVar.part_class.m_Lm := 311341;
+  iniVar.part_class.m_MUml := 0.00125;
+  iniVar.part_class.m_SIGml := 0.914;
+  iniVar.part_class.m_LBoil := 0;
+  iniVar.part_class.m_AW := 26.98;
 
   iniVar.inc_class.m_nId := 52;
   iniVar.inc_class.m_Material := 'Cu2O';
@@ -437,6 +444,57 @@ begin
   //ShowMessage(floattostr(iniVar.part_class.m_Tm));
   
   case iniVar.tip_materiala of
+         0 :
+             begin
+               log ('Используем расчет по формуле металлов');
+
+               tmpD1 := -1;
+               tmpD2 := -1;
+
+               //Посчитаем как будет при НЕ забывании подложки
+               advcalculator_metal (false, iniVar.dpmax_abs/1000000, iniVar.temp_patic_max, iniVar.temp_base, absolut_max_velos, iniVar.part_class, iniVar.sub_class, iniVar.h_max, iniVar.Ds_max_abs, scen, h, -2);
+
+
+               //Если оно нормальное, то запомним...
+               if FloatIsNorm(iniVar.Ds_max_abs) AND FloatIsNorm(iniVar.h_max)
+                then  tmpD1 := iniVar.Ds_max_abs
+                else
+                  begin
+                    ShowMessage('Функция advcalculator вернула неопределенное значение и для режима без забывания подложки, первый сплэт мы сгенерить не сможем');
+                    Application.Terminate;
+                  end;
+
+               //Посчитаем как будет при забывании подложки
+               advcalculator_metal (true,  iniVar.dpmax_abs/1000000, iniVar.temp_patic_max, iniVar.temp_base, absolut_max_velos, iniVar.part_class, iniVar.sub_class, iniVar.h_max, iniVar.Ds_max_abs, scen, h, -2);
+               if FloatIsNorm(iniVar.Ds_max_abs) AND FloatIsNorm(iniVar.h_max)
+                then  tmpD2 := iniVar.Ds_max_abs;
+
+
+               if ((tmpD1>=0) and (tmpD2>=0) and (tmpD1 > tmpD2)) OR
+                  ( (tmpD1>=0) and (tmpD2<0) )
+               then
+                  begin
+                   //Посчитаем как будет при НЕ забывании подложки
+                   advcalculator_metal (false, iniVar.dpmax_abs/1000000, iniVar.temp_patic_max, iniVar.temp_base, absolut_max_velos, iniVar.part_class, iniVar.sub_class, iniVar.h_max, iniVar.Ds_max_abs, scen, h, -2);
+
+                  end
+               else
+                  begin
+                    if ((tmpD1>=0) and (tmpD2>=0) ) OR
+                       ( (tmpD1<0) and (tmpD2>=0) )
+                    then
+                      begin
+                       //Посчитаем как будет при забывании подложки
+                       advcalculator_metal (true,  iniVar.dpmax_abs/1000000, iniVar.temp_patic_max, iniVar.temp_base, absolut_max_velos, iniVar.part_class, iniVar.sub_class, iniVar.h_max, iniVar.Ds_max_abs, scen, h, -2);
+
+                      end
+                    else
+                      begin
+                        ShowMessage('Функция advcalculator вернула неопределенное значение и для режима с забыванием подложки и для режима без забывания подложки');
+                        Application.Terminate;
+                      end;
+                  end;
+             end;
          1 : begin
                log ('Используем расчет по формеле оксидов');
 
@@ -646,8 +704,6 @@ begin
   DateTimeToString( vrb.start_timestamp, 'yyyy_mm_dd__hh_nn_ss', now);
 
   GenerateCoatingNew();
-
-
 
 
 

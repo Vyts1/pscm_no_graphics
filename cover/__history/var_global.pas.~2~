@@ -83,6 +83,8 @@
 
 
   fild : mas;     // поле моделирования - плоскость.
+  fild_impact : mas;     // массив для столкновений...
+
   up :kub;
   cup:ckub;  // Это массив для хранения всего объема.
   volna : Tvolna;
@@ -111,4 +113,5 @@
 
   LogRec : Tlog;
 
-  chetnaya_chastica:boolean;
+  chetnaya_chastica:boolean;  // переменные для норм. распределения
+  fi_norm_ras: double; // переменные для норм. распределения
